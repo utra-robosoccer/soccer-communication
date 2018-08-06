@@ -2,7 +2,7 @@
 """
 Created June 6 2018
 
-Author: Tyler
+Author: Tyler 
 """
 
 import serial
