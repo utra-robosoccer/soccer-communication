@@ -3,24 +3,18 @@
 """
 Created June 6 2018
 
-Author: Tyler
+Author: Tyler and Jason
 """
 
+import argparse
 import serial
 import time
 import os
+import sys
 import numpy as np
-import rospy
 import struct
 from datetime import datetime
 from prettytable import PrettyTable
-from soccer_msgs.msg import RobotGoal
-from soccer_msgs.msg import RobotState
-from sensor_msgs.msg import Imu
-from geometry_msgs.msg import Vector3
-from geometry_msgs.msg import Quaternion
-from tf.msg import tfMessage
-from tf.transformations import quaternion_from_euler
 
 def rxDecoder(raw, decodeHeader=True):
     ''' Decodes raw bytes received from the microcontroller. As per the agreed
@@ -30,33 +24,22 @@ def rxDecoder(raw, decodeHeader=True):
     
     motors = list()
     imu = list()
-    
-    if(decodeHeader):
-        header = struct.unpack('<L',raw[0:4])[0]
-        for i in range(12):
-            # Here, we only unpack for 12 motors since that's all we have connected
-            # in our current setup
-            motors.append(struct.unpack('<f',raw[8 + i * 4:12 + i * 4])[0])
-        for i in range(6):
-            # Unpack IMU Data
-            imu.append(struct.unpack('<f', raw[56 + i * 4: 60 + i * 4])[0])
-        return (header, motors, imu)
-    else:
-        for i in range(12):
-            # Here, we only unpack for 12 motors since that's all we have connected
-            # in our current setup
-            motors.append(struct.unpack('<f',raw[4 + i * 4:8 + i * 4])[0])
-        for i in range(6):
-            # Unpack IMU Data
-            imu.append(struct.unpack('<f', raw[52 + i * 4: 56 + i * 4])[0])
-        return (motors, imu)
+
+    for i in range(12):
+        # Here, we only unpack for 12 motors since that's all we have connected
+        # in our current setup
+        motors.append(struct.unpack('<f',raw[4 + i * 4:8 + i * 4])[0])
+    for i in range(6):
+        # Unpack IMU Data
+        imu.append(struct.unpack('<f', raw[52 + i * 4: 56 + i * 4])[0])
+    return (motors, imu)
     
 def logString(userMsg):
     ''' Prints the desired string to the shell, precedded by the date and time.
     '''
     print(datetime.now().strftime('%H.%M.%S.%f') + " " + userMsg)
 
-def sendPacketToMCU(byteStream):
+def sendPacketToMCU(ser, byteStream):
     ''' Sends bytes to the MCU with the header sequence attached.
     '''
     header = struct.pack('<L', 0xFFFFFFFF)
@@ -104,7 +87,7 @@ def printAsIMUData(vec1):
     
     print(t)
     
-def receivePacketFromMCU():
+def receivePacketFromMCU(ser):
     ''' Receives 80 bytes of the MCU provided that there is a valid 4-byte 
         header attached to the front. Returns the list of data interpreted as
         32-bit floats.
@@ -134,12 +117,12 @@ def receivePacketFromMCU():
             break
     return buff
     
-def receiveWithChecks():
+def receiveWithChecks(ser):
     ''' Receives a packet from the MCU and performs basic checks on the packet
         for data integrity. Also decodes the packet and prints a data readout 
         every so often.
     '''
-    (recvAngles, recvIMUData) = rxDecoder(receivePacketFromMCU(),
+    (recvAngles, recvIMUData) = rxDecoder(receivePacketFromMCU(ser),
                                             decodeHeader=False)
     
     imuArray = np.array(recvIMUData).reshape((6, 1))
@@ -157,31 +140,6 @@ def receiveWithChecks():
                     np.array(recvAngles).reshape((12, 1))
             )
         printAsIMUData(np.array(recvIMUData).reshape((6, 1)))
-        
-def receiveWithoutChecks():
-    ''' Receives a packet from the MCU by completely trusting the data integrity
-        and doing no checks whatsoever. Also decodes the packet and prints
-        a data readout every so often.
-    '''
-    while(ser.in_waiting < 92):
-        time.sleep(0.001)
-    rawData = ser.read(92)
-                    
-    (header, recvAngles, recvIMUData) = rxDecoder(rawData)
-    
-    if(numTransfers % 50 == 0):
-        print('\n')
-        logString("Header matches sequence: " + 
-                    str(header == 0xFFFFFFFF)
-            )
-        printAsAngles(angles[0:12], 
-                    np.array(recvAngles).reshape((12,1))
-            )
-        printAsIMUData(np.array(recvIMUData).reshape((6, 1)))
-           
-    # Forward to control application
-    # if(header == 0xFFFFFFFF):
-    #     # TODO
 
 
 def trajectory_callback(robotGoal):
@@ -190,22 +148,117 @@ def trajectory_callback(robotGoal):
     angles[0:18,0] = robotGoal.trajectories[0:18]
     sendPacketToMCU(vec2bytes(robotGoal.trajectories[0:18]))
     receiveWithChecks()
-    
 
-if __name__ == "__main__":
-    os.chdir('/home/nvidia/soccer-embedded/Development/Comm-PC')
-    logString("Starting PC-side application")
+def get_script_path():
+    return os.path.dirname(os.path.realpath(sys.argv[0]))
     
-    trajectory = np.loadtxt(open("getupfront.csv", "rb"), delimiter=",", skiprows=0)
-    angles = np.zeros((18, 1))   
-
-    ser = serial.Serial('/dev/ttyUSB0',230400,timeout=100)
-    
-    numTransfers = 0
-    logString("Opened port " + ser.name)
+class soccer_hardware:
+    def __init__(self):
+        os.chdir(get_script_path())
+        logString("Starting PC-side application")
         
-    rospy.init_node('soccer_hardware', anonymous=True)
-    rospy.Subscriber("robotGoal", RobotGoal, trajectory_callback, queue_size=1)
-    pub = rospy.Publisher('soccerbot/imu', Imu, queue_size=1)
-
-    rospy.spin()            
+        parser = argparse.ArgumentParser(description='Soccer hardware')
+        parser.add_argument(
+            '-r',
+            '--ros',
+            help='Imports ROS-related dependencies if True or omitted. Default: True',
+            default=True
+        )
+        parser.add_argument(
+            '--port',
+            help='Specifies the port argument to the serial.Serial constructor. Default: /dev/ttyUSB0',
+            default='/dev/ttyUSB0'
+        )
+        
+        parser.add_argument(
+            '--baud',
+            help='Specifies the serial port baud rate. Default: 230400',
+            default=230400
+        )
+        
+        parser.add_argument(
+            '--traj',
+            help='Specifies the trajectory to use by default. Default: standing.csv',
+            default='standing.csv'
+        )
+        
+        args = vars(parser.parse_args())
+        
+        self.isROSmode = args['ros']
+        self.port = args['port']
+        self.baud = args['baud']
+        self.traj = args['traj']
+        
+        if(self.isROSmode == True):
+            import rospy
+            from soccer_msgs.msg import RobotGoal
+            from soccer_msgs.msg import RobotState
+            from sensor_msgs.msg import Imu
+            from geometry_msgs.msg import Vector3
+            from geometry_msgs.msg import Quaternion
+            from tf.msg import tfMessage
+            from tf.transformations import quaternion_from_euler
+        
+        logString("Started with ROS = {0}".format(args['ros'] == True))
+        
+        logString("Attempting to open trajectory file \'{0}\'".format(self.traj))
+        
+        trajectories_dir = os.path.join("trajectories", self.traj)
+        
+        self.trajectory = np.loadtxt(
+            open(trajectories_dir, "rb"),
+            delimiter=",",
+            skiprows=0
+        )
+        
+        logString("Initialized soccer hardware with trajectory {0}".format(
+                self.traj
+            )
+        )
+                
+    def connectToEmbedded(self):
+        logString(
+            "Attempting connection to embedded systems via port {0} with baud rate {1}".format(
+                self.port,
+                self.baud
+            )
+        )
+        
+        try:
+            self.ser = serial.Serial(self.port, self.baud,timeout=100)
+        except:
+            logString("Connection failed. Exiting")
+            sys.exit(1)
+            
+        logString("Connected")
+        
+    def loopTrajectory(self):
+        numTransfers = 0
+        try:
+            while(self.ser.isOpen()):
+                for i in range(self.trajectory.shape[1]):
+                    angles = self.trajectory[:, i:i+1]
+    
+                    sendPacketToMCU(self.ser, vec2bytes(angles))
+                    numTransfers = numTransfers + 1
+                    receiveWithChecks(self.ser)
+        except serial.serialutil.SerialException as e:
+            logString("Serial exception {0}. Exiting".format(e))
+            sys.exit(1)
+        except:
+            logString("Unknown exception. Exiting")
+            sys.exit(1)
+    
+if __name__ == "__main__":
+    sh = soccer_hardware()
+    sh.connectToEmbedded()
+    
+    if(sh.isROSmode == True):
+        rospy.init_node('soccer_hardware', anonymous=True)
+        rospy.Subscriber("robotGoal", RobotGoal, trajectory_callback, queue_size=1)
+        pub = rospy.Publisher('soccerbot/imu', Imu, queue_size=1)
+        rospy.spin() 
+    else:
+        sh.loopTrajectory()
+    
+    sys.exit(0)      
