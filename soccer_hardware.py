@@ -13,15 +13,27 @@ import os
 import sys
 import numpy as np
 import struct
+
 from datetime import datetime
 from prettytable import PrettyTable
+
+try:
+    import rospy
+    from soccer_msgs.msg import RobotGoal
+    from soccer_msgs.msg import RobotState
+    from sensor_msgs.msg import Imu
+    from geometry_msgs.msg import Vector3
+    from geometry_msgs.msg import Quaternion
+    from tf.msg import tfMessage
+    from tf.transformations import quaternion_from_euler
+except:
+    print("No ROS")
 
 def rxDecoder(raw, decodeHeader=True):
     ''' Decodes raw bytes received from the microcontroller. As per the agreed
         upon protocol, the first 4 bytes are for a header while the remaining
         80 bytes contain floats for each motor.
     '''
-    
     motors = list()
     imu = list()
 
@@ -92,6 +104,7 @@ def receivePacketFromMCU(ser):
         header attached to the front. Returns the list of data interpreted as
         32-bit floats.
     '''
+    
     BUFF_SIZE = 4
     totalBytesRead = 0
     startSeqCount = 0
@@ -117,37 +130,31 @@ def receivePacketFromMCU(ser):
             break
     return buff
     
-def receiveWithChecks(ser):
+def receiveWithChecks(ser, isROSmode, numTransfers, angles):
     ''' Receives a packet from the MCU and performs basic checks on the packet
         for data integrity. Also decodes the packet and prints a data readout 
         every so often.
     '''
+    
     (recvAngles, recvIMUData) = rxDecoder(receivePacketFromMCU(ser),
                                             decodeHeader=False)
-    
+
     imuArray = np.array(recvIMUData).reshape((6, 1))
-    imu = Imu()
-    vec1 = Vector3(imuArray[0][0], imuArray[1][0], imuArray[2][0])
-    imu.angular_velocity = vec1
-    vec2 = Vector3(imuArray[3][0], imuArray[4][0], imuArray[5][0])
-    imu.linear_acceleration = vec2
-    pub.publish(imu)
+    
+    if(isROSmode == True):
+        imu = Imu()
+        vec1 = Vector3(imuArray[0][0], imuArray[1][0], imuArray[2][0])
+        imu.angular_velocity = vec1
+        vec2 = Vector3(imuArray[3][0], imuArray[4][0], imuArray[5][0])
+        imu.linear_acceleration = vec2
+        pub.publish(imu)
     
     if(numTransfers % 50 == 0):
+        
         print('\n')
         logString("Received valid data")
-        printAsAngles(angles[0:12], 
-                    np.array(recvAngles).reshape((12, 1))
-            )
+        printAsAngles(angles[0:12], np.array(recvAngles).reshape((12, 1)))
         printAsIMUData(np.array(recvIMUData).reshape((6, 1)))
-
-
-def trajectory_callback(robotGoal):
-    if not ser.isOpen():
-        return
-    angles[0:18,0] = robotGoal.trajectories[0:18]
-    sendPacketToMCU(vec2bytes(robotGoal.trajectories[0:18]))
-    receiveWithChecks()
 
 def get_script_path():
     return os.path.dirname(os.path.realpath(sys.argv[0]))
@@ -182,6 +189,18 @@ class soccer_hardware:
             default='standing.csv'
         )
         
+        parser.add_argument(
+            '__name',
+            nargs='?',
+            help='ROS argument'
+        )
+        
+        parser.add_argument(
+            '__log',
+            nargs='?',
+            help='ROS argument'
+        )
+        
         args = vars(parser.parse_args())
         
         self.isROSmode = args['ros']
@@ -189,15 +208,6 @@ class soccer_hardware:
         self.baud = args['baud']
         self.traj = args['traj']
         
-        if(self.isROSmode == True):
-            import rospy
-            from soccer_msgs.msg import RobotGoal
-            from soccer_msgs.msg import RobotState
-            from sensor_msgs.msg import Imu
-            from geometry_msgs.msg import Vector3
-            from geometry_msgs.msg import Quaternion
-            from tf.msg import tfMessage
-            from tf.transformations import quaternion_from_euler
         
         logString("Started with ROS = {0}".format(args['ros'] == True))
         
@@ -238,16 +248,26 @@ class soccer_hardware:
             while(self.ser.isOpen()):
                 for i in range(self.trajectory.shape[1]):
                     angles = self.trajectory[:, i:i+1]
-    
+                    
                     sendPacketToMCU(self.ser, vec2bytes(angles))
                     numTransfers = numTransfers + 1
-                    receiveWithChecks(self.ser)
+                    receiveWithChecks(self.ser, self.isROSmode, numTransfers, angles)
+                    
         except serial.serialutil.SerialException as e:
             logString("Serial exception {0}. Exiting".format(e))
             sys.exit(1)
-        except:
-            logString("Unknown exception. Exiting")
+        except Exception as e:
+            logString(str(e))
             sys.exit(1)
+
+    def trajectory_callback(self, robotGoal):
+        numTransfers = 0
+        if not self.ser.isOpen():
+            return
+        angles = np.zeros((18,1))
+        angles[0:18,0] = robotGoal.trajectories[0:18]
+        sendPacketToMCU(self.ser, vec2bytes(angles))
+        receiveWithChecks(self.ser, self.isROSmode, numTransfers, angles)
     
 if __name__ == "__main__":
     sh = soccer_hardware()
@@ -255,7 +275,7 @@ if __name__ == "__main__":
     
     if(sh.isROSmode == True):
         rospy.init_node('soccer_hardware', anonymous=True)
-        rospy.Subscriber("robotGoal", RobotGoal, trajectory_callback, queue_size=1)
+        rospy.Subscriber("robotGoal", RobotGoal, sh.trajectory_callback)
         pub = rospy.Publisher('soccerbot/imu', Imu, queue_size=1)
         rospy.spin() 
     else:
