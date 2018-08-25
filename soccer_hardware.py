@@ -142,12 +142,28 @@ def receiveWithChecks(ser, isROSmode, numTransfers, angles):
     imuArray = np.array(recvIMUData).reshape((6, 1))
     
     if(isROSmode == True):
+        ''' IMU Feedback '''
         imu = Imu()
-        vec1 = Vector3(imuArray[0][0], imuArray[1][0], imuArray[2][0])
+        vec1 = Vector3(-imuArray[2][0], imuArray[1][0], imuArray[0][0])
         imu.angular_velocity = vec1
-        vec2 = Vector3(imuArray[3][0], imuArray[4][0], imuArray[5][0])
+        vec2 = Vector3(imuArray[5][0], imuArray[4][0], imuArray[3][0])
         imu.linear_acceleration = vec2
         pub.publish(imu)
+        
+        ''' Motor Feedback '''
+        robotState = RobotState()
+        for i in range(0,12):
+			recvAngles[i] = (recvAngles[i] - 150) / 180 * 3.1415926
+			robotState.joint_angles[i] = recvAngles[i]
+		
+        recvAngles[3] = -recvAngles[3]
+        recvAngles[4] = -recvAngles[4]
+        recvAngles[7] = -recvAngles[7]
+        recvAngles[9] = -recvAngles[9]
+        recvAngles[10] = -recvAngles[10]
+
+        pub2.publish(robotState)
+        
     
     if(numTransfers % 50 == 0):
         
@@ -266,6 +282,13 @@ class soccer_hardware:
             return
         angles = np.zeros((18,1))
         angles[0:18,0] = robotGoal.trajectories[0:18]
+        
+        angles[1,0] =-(angles[1,0])
+        angles[5,0] =-(angles[5,0])
+        angles[6,0] =-(angles[6,0])
+
+        angles[0:6,0] = np.flipud(angles[0:6,0])
+        
         sendPacketToMCU(self.ser, vec2bytes(angles))
         receiveWithChecks(self.ser, self.isROSmode, numTransfers, angles)
     
@@ -275,8 +298,9 @@ if __name__ == "__main__":
     
     if(sh.isROSmode == True):
         rospy.init_node('soccer_hardware', anonymous=True)
-        rospy.Subscriber("robotGoal", RobotGoal, sh.trajectory_callback)
+        rospy.Subscriber("robotGoal", RobotGoal, sh.trajectory_callback, queue_size=1)
         pub = rospy.Publisher('soccerbot/imu', Imu, queue_size=1)
+        pub2 = rospy.Publisher('soccerbot/robotState', RobotState, queue_size=1)
         rospy.spin() 
     else:
         sh.loopTrajectory()
