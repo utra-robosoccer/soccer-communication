@@ -10,7 +10,6 @@ import serial
 import time
 import os
 import numpy as np
-import rospy
 import struct
 from datetime import datetime
 from prettytable import PrettyTable
@@ -27,8 +26,7 @@ def rxDecoder(raw, decodeHeader=True):
     if(decodeHeader):
         header = struct.unpack('<L',raw[0:4])[0]
         for i in range(12):
-            # Here, we only unpack for 12 motors since that's all we have connected
-            # in our current setup
+            # Only reading from 12 motors right now
             motors.append(struct.unpack('<f',raw[8 + i * 4:12 + i * 4])[0])
         for i in range(6):
             # Unpack IMU Data
@@ -36,8 +34,7 @@ def rxDecoder(raw, decodeHeader=True):
         return (header, motors, imu)
     else:
         for i in range(12):
-            # Here, we only unpack for 12 motors since that's all we have connected
-            # in our current setup
+            # Only reading from 12 motors right now
             motors.append(struct.unpack('<f',raw[4 + i * 4:8 + i * 4])[0])
         for i in range(6):
             # Unpack IMU Data
@@ -76,11 +73,15 @@ def printAsAngles(vec1, vec2):
     ''' Prints out 2 numpy vectors side-by-side, where the first vector entry
         is interpreted as belonging to motor 1, the seconds to motor 2, etc.
     '''
-    assert vec1.shape[0] == vec2.shape[0]
+    try:
+        assert vec1.shape == vec2.shape
+    except:
+        print("Vec1 shape: {0}\nVec2 shape {1}".format(vec1.shape, vec2.shape))
+    
     t = PrettyTable(['Motor Number', 'Sent', 'Received'])
     
     for i in range(vec1.shape[0]):
-        t.add_row([str(i + 1), round(vec1[i][0], 4), round(vec2[i][0], 2)])
+        t.add_row([str(i + 1), round(vec1[i], 4), round(vec2[i], 2)])
     
     print(t)
 
@@ -91,9 +92,9 @@ def printAsIMUData(vec1):
     
     t = PrettyTable(['', 'Gyro (deg/s)', 'Accel (m/s^2)'])
     
-    t.add_row(["X", round(vec1[0][0], 2), round(vec1[3][0], 2)])
-    t.add_row(["Y", round(vec1[1][0], 2), round(vec1[4][0], 2)])
-    t.add_row(["Z", round(vec1[2][0], 2), round(vec1[5][0], 2)])
+    t.add_row(["X", round(vec1[0], 2), round(vec1[3], 2)])
+    t.add_row(["Y", round(vec1[1], 2), round(vec1[4], 2)])
+    t.add_row(["Z", round(vec1[2], 2), round(vec1[5], 2)])
     
     print(t)
     
@@ -138,56 +139,83 @@ def receiveWithChecks():
     if(numTransfers % 50 == 0):
         print('\n')
         logString("Received valid data")
-        printAsAngles(angles[0:12], 
-                    np.array(recvAngles).reshape((12, 1))
-            )
-        printAsIMUData(np.array(recvIMUData).reshape((6, 1)))
-        
-def receiveWithoutChecks():
-    ''' Receives a packet from the MCU by completely trusting the data integrity
-        and doing no checks whatsoever. Also decodes the packet and prints
-        a data readout every so often.
-    '''
-    while(ser.in_waiting < 92):
-        time.sleep(0.001)
-    rawData = ser.read(92)
-                    
-    (header, recvAngles, recvIMUData) = rxDecoder(rawData)
+        recvAngles = np.array(recvAngles)
+        recvAngles = mcuToCtrlAngles(recvAngles)
+        printAsAngles(angles[0:12], recvAngles[0:12])
+        printAsIMUData(np.array(recvIMUData).reshape((6,)))
     
-    if(numTransfers % 50 == 0):
-        print('\n')
-        logString("Header matches sequence: " + 
-                    str(header == 0xFFFFFFFF)
-            )
-        printAsAngles(angles[0:12], 
-                    np.array(recvAngles).reshape((12,1))
-            )
-        printAsIMUData(np.array(recvIMUData).reshape((6, 1)))
-           
-    # Forward to control application
-    # if(header == 0xFFFFFFFF):
-    #     # TODO
+def ctrlToMcuAngles(ctrlAngles):
+    ''' Applies a linear transformation to the motor angles
+        received from the control system to convert them to
+        the coordinate system used by the motors
+    '''
+    arr = np.zeros((18,1))
+    arr[:ctrlAngles.shape[0],:ctrlAngles.shape[1]] = ctrlAngles
+    
+    # Multiplicative transformation factor
+    m = [1, 1, 1, -1, -1, -1, -1, -1, 1, -1, -1, 1, 1, 1, -1, -1, -1, -1]
+    m = np.array(m) * 180.0 / np.pi
+    
+    # Additive transformation factor
+    a = [150, 150, 150, 150, 150, 150, 150, 150, 150, 150, 150, 150, 150, 60, 150, 240, 150, 150]
+    a = np.array(a)
+    
+    return m.dot(arr) + a
+    
+def mcuToCtrlAngles(mcuAngles):
+    ''' Applies a linear transformation to the motor angles
+        received from the embedded systems to convert them to
+        the coordinate system used by the control systems
+    '''
+    arr = np.zeros((18,))
+    
+    arr[:mcuAngles.shape[0],] = mcuAngles
+    # Additive transformation factor
+    a = [150, 150, 150, 150, 150, 150, 150, 150, 150, 150, 150, 150, 150, 60, 150, 240, 150, 150]
+    a = np.array(a)
+    
+    # Multiplicative transformation factor
+    m = [1, 1, 1, -1, -1, -1, -1, -1, 1, -1, -1, 1, 1, 1, -1, -1, -1, -1]
+    m = np.array(m) * 180.0 / np.pi
+    
+    return (arr - a) / m
 
 if __name__ == "__main__":
-    #os.chdir('/home/shahryar/soccer-embedded/Development/Comm-PC')
-    os.chdir('/home/nvidia/soccer-embedded/Development/Comm-PC')
     logString("Starting PC-side application")
+    useTrajectory = False
+    stepThrough = False
+    useJetson = False
     
-    trajectory = np.loadtxt(open("getupfront.csv", "rb"), delimiter=",", skiprows=0)
+    if(useTrajectory):
+        if(useJetson):
+            os.chdir('/home/nvidia/soccer-embedded/Development/Comm-PC')
+        else:
+            print("Change to your directory here!")
+        trajectory = np.loadtxt(open("getupfront.csv", "rb"), delimiter=",", skiprows=0)
     
-    # with serial.Serial('/dev/ttyACM0',230400,timeout=100) as ser:
-    with serial.Serial('/dev/ttyUSB0',230400,timeout=100) as ser:
+    if(useJetson):
+        port = '/dev/ttyUSB0'
+    else:
+        port = 'COM14'
+    
+    with serial.Serial(port,230400,timeout=100) as ser:
         logString("Opened port " + ser.name)
         
         numTransfers = 0
         while(ser.isOpen()):
-            for i in range(trajectory.shape[1]):
-                # Uncomment this if you want to step through the trajectories via user input
-                dummy = raw_input('');
-                angles = trajectory[:, i:i+1]
-                #angles = np.zeros((18, 1))
+            if(useTrajectory):
+                for i in range(trajectory.shape[1]):
+                    if(stepThrough):
+                        dummy = input('Press anything to step through the trajectory')
+                    angles = trajectory[:, i:i+1]
+                    sendPacketToMCU(vec2bytes(angles))
+                    numTransfers = numTransfers + 1
+                    receiveWithChecks()
+            else:
+                if(stepThrough):
+                    dummy = input('Press anything to step through the trajectory')
+                angles = np.zeros((18,1))
+                angles = ctrlToMcuAngles(angles)
                 sendPacketToMCU(vec2bytes(angles))
-                
                 numTransfers = numTransfers + 1
-                
                 receiveWithChecks()

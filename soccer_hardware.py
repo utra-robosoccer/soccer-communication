@@ -82,7 +82,7 @@ def printAsAngles(vec1, vec2):
     t = PrettyTable(['Motor Number', 'Sent', 'Received'])
     
     for i in range(vec1.shape[0]):
-        t.add_row([str(i + 1), round(vec1[i][0], 4), round(vec2[i][0], 2)])
+        t.add_row([str(i + 1), round(vec1[i], 4), round(vec2[i], 2)])
     
     print(t)
 
@@ -93,9 +93,9 @@ def printAsIMUData(vec1):
     
     t = PrettyTable(['', 'Gyro (deg/s)', 'Accel (m/s^2)'])
     
-    t.add_row(["X", round(vec1[0][0], 2), round(vec1[3][0], 2)])
-    t.add_row(["Y", round(vec1[1][0], 2), round(vec1[4][0], 2)])
-    t.add_row(["Z", round(vec1[2][0], 2), round(vec1[5][0], 2)])
+    t.add_row(["X", round(vec1[0], 2), round(vec1[3], 2)])
+    t.add_row(["Y", round(vec1[1], 2), round(vec1[4], 2)])
+    t.add_row(["Z", round(vec1[2], 2), round(vec1[5], 2)])
     
     print(t)
     
@@ -140,6 +140,8 @@ def receiveWithChecks(ser, isROSmode, numTransfers, angles):
                                             decodeHeader=False)
 
     imuArray = np.array(recvIMUData).reshape((6, 1))
+    angleArray = np.array(recvAngles)
+    angleArray = mcuToCtrlAngles(angleArray)
     
     if(isROSmode == True):
         ''' IMU Feedback '''
@@ -152,10 +154,9 @@ def receiveWithChecks(ser, isROSmode, numTransfers, angles):
         
         ''' Motor Feedback '''
         robotState = RobotState()
-        for i in range(0,12):
-			recvAngles[i] = (recvAngles[i] - 150) / 180 * 3.1415926
-			robotState.joint_angles[i] = recvAngles[i]
-		
+        for i in range(12):
+            robotState.joint_angles[i] = recvAngles[i]
+        
         recvAngles[3] = -recvAngles[3]
         recvAngles[4] = -recvAngles[4]
         recvAngles[7] = -recvAngles[7]
@@ -166,11 +167,46 @@ def receiveWithChecks(ser, isROSmode, numTransfers, angles):
         
     
     if(numTransfers % 50 == 0):
-        
         print('\n')
         logString("Received valid data")
-        printAsAngles(angles[0:12], np.array(recvAngles).reshape((12, 1)))
-        printAsIMUData(np.array(recvIMUData).reshape((6, 1)))
+        printAsAngles(angles[0:12], angleArray[0:12])
+        printAsIMUData(imuArray)
+        
+def ctrlToMcuAngles(ctrlAngles):
+    ''' Applies a linear transformation to the motor angles
+        received from the control system to convert them to
+        the coordinate system used by the motors
+    '''
+    arr = np.zeros((18,1))
+    arr[:ctrlAngles.shape[0],:ctrlAngles.shape[1]] = ctrlAngles
+    
+    # Multiplicative transformation factor
+    m = [1, 1, 1, -1, -1, -1, -1, -1, 1, -1, -1, 1, 1, 1, -1, -1, -1, -1]
+    m = np.array(m) * 180.0 / np.pi
+    
+    # Additive transformation factor
+    a = [150, 150, 150, 150, 150, 150, 150, 150, 150, 150, 150, 150, 150, 60, 150, 240, 150, 150]
+    a = np.array(a)
+    
+    return m.dot(arr) + a
+    
+def mcuToCtrlAngles(mcuAngles):
+    ''' Applies a linear transformation to the motor angles
+        received from the embedded systems to convert them to
+        the coordinate system used by the control systems
+    '''
+    arr = np.zeros((18,))
+    
+    arr[:mcuAngles.shape[0],] = mcuAngles
+    # Additive transformation factor
+    a = [150, 150, 150, 150, 150, 150, 150, 150, 150, 150, 150, 150, 150, 60, 150, 240, 150, 150]
+    a = np.array(a)
+    
+    # Multiplicative transformation factor
+    m = [1, 1, 1, -1, -1, -1, -1, -1, 1, -1, -1, 1, 1, 1, -1, -1, -1, -1]
+    m = np.array(m) * 180.0 / np.pi
+    
+    return (arr - a) / m
 
 def get_script_path():
     return os.path.dirname(os.path.realpath(sys.argv[0]))
@@ -265,8 +301,10 @@ class soccer_hardware:
                 for i in range(self.trajectory.shape[1]):
                     angles = self.trajectory[:, i:i+1]
                     
+                    angles = ctrlToMcuAngles(angles)
                     sendPacketToMCU(self.ser, vec2bytes(angles))
                     numTransfers = numTransfers + 1
+                    
                     receiveWithChecks(self.ser, self.isROSmode, numTransfers, angles)
                     
         except serial.serialutil.SerialException as e:
