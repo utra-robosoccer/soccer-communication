@@ -81,7 +81,7 @@ def printAsAngles(vec1, vec2):
     t = PrettyTable(['Motor Number', 'Sent', 'Received'])
     
     for i in range(vec1.shape[0]):
-        t.add_row([str(i + 1), round(vec1[i], 4), round(vec2[i], 2)])
+        t.add_row([str(i + 1), round(vec1[i][0], 4), round(vec2[i][0], 2)])
     
     print(t)
 
@@ -140,6 +140,7 @@ def receiveWithChecks():
         print('\n')
         logString("Received valid data")
         recvAngles = np.array(recvAngles)
+        recvAngles = recvAngles[:, np.newaxis]
         recvAngles = mcuToCtrlAngles(recvAngles)
         printAsAngles(angles[0:12], recvAngles[0:12])
         printAsIMUData(np.array(recvIMUData).reshape((6,)))
@@ -149,41 +150,43 @@ def ctrlToMcuAngles(ctrlAngles):
         received from the control system to convert them to
         the coordinate system used by the motors
     '''
-    arr = np.zeros((18,1))
+    arr = np.zeros((18,1), dtype=np.float)
     arr[:ctrlAngles.shape[0],:ctrlAngles.shape[1]] = ctrlAngles
     
     # Multiplicative transformation factor
-    m = [1, 1, 1, -1, -1, -1, -1, -1, 1, -1, -1, 1, 1, 1, -1, -1, -1, -1]
-    m = np.array(m) * 180.0 / np.pi
+    m = np.array([1, 1, 1, -1, -1, -1, -1, -1, 1, -1, -1, 1, 1, 1, -1, -1, -1, -1])
+    m = m[:, np.newaxis]
+    m = m * 180.0 / np.pi
     
     # Additive transformation factor
-    a = [150, 150, 150, 150, 150, 150, 150, 150, 150, 150, 150, 150, 150, 60, 150, 240, 150, 150]
-    a = np.array(a)
+    a = np.array([150, 150, 150, 150, 150, 150, 150, 150, 150, 150, 150, 150, 150, 60, 150, 240, 150, 150])
+    a = a[:, np.newaxis]
     
-    return m.dot(arr) + a
+    return (m * arr) + a
     
 def mcuToCtrlAngles(mcuAngles):
     ''' Applies a linear transformation to the motor angles
         received from the embedded systems to convert them to
         the coordinate system used by the control systems
     '''
-    arr = np.zeros((18,))
+    arr = np.zeros((18,1), dtype=np.float)
+    arr[:mcuAngles.shape[0],:mcuAngles.shape[1]] = mcuAngles
     
-    arr[:mcuAngles.shape[0],] = mcuAngles
     # Additive transformation factor
-    a = [150, 150, 150, 150, 150, 150, 150, 150, 150, 150, 150, 150, 150, 60, 150, 240, 150, 150]
-    a = np.array(a)
+    a = np.array([150, 150, 150, 150, 150, 150, 150, 150, 150, 150, 150, 150, 150, 60, 150, 240, 150, 150])
+    a = a[:, np.newaxis]
     
     # Multiplicative transformation factor
-    m = [1, 1, 1, -1, -1, -1, -1, -1, 1, -1, -1, 1, 1, 1, -1, -1, -1, -1]
-    m = np.array(m) * 180.0 / np.pi
+    m = np.array([1, 1, 1, -1, -1, -1, -1, -1, 1, -1, -1, 1, 1, 1, -1, -1, -1, -1])
+    m = m[:, np.newaxis]
+    m = m * 180.0 / np.pi
     
     return (arr - a) / m
 
 if __name__ == "__main__":
     logString("Starting PC-side application")
     useTrajectory = False
-    stepThrough = False
+    stepThrough = True
     useJetson = False
     
     if(useTrajectory):
@@ -191,12 +194,13 @@ if __name__ == "__main__":
             os.chdir('/home/nvidia/soccer-embedded/Development/Comm-PC')
         else:
             print("Change to your directory here!")
+            os.chdir('D:\\Users\\Tyler\\Documents\\STM\\embedded\\soccer-embedded\\PC Communication\\trajectories')
         trajectory = np.loadtxt(open("getupfront.csv", "rb"), delimiter=",", skiprows=0)
     
     if(useJetson):
         port = '/dev/ttyUSB0'
     else:
-        port = 'COM14'
+        port = 'COM7'
     
     with serial.Serial(port,230400,timeout=100) as ser:
         logString("Opened port " + ser.name)
@@ -207,7 +211,8 @@ if __name__ == "__main__":
                 for i in range(trajectory.shape[1]):
                     if(stepThrough):
                         dummy = input('Press anything to step through the trajectory')
-                    angles = trajectory[:, i:i+1]
+                    angles = trajectory[:18, i:i+1]
+                    angles = ctrlToMcuAngles(angles)
                     sendPacketToMCU(vec2bytes(angles))
                     numTransfers = numTransfers + 1
                     receiveWithChecks()

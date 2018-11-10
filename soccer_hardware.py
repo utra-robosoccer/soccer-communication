@@ -82,7 +82,7 @@ def printAsAngles(vec1, vec2):
     t = PrettyTable(['Motor Number', 'Sent', 'Received'])
     
     for i in range(vec1.shape[0]):
-        t.add_row([str(i + 1), round(vec1[i], 4), round(vec2[i], 2)])
+        t.add_row([str(i + 1), round(vec1[i][0], 4), round(vec2[i][0], 2)])
     
     print(t)
 
@@ -141,6 +141,7 @@ def receiveWithChecks(ser, isROSmode, numTransfers, angles):
 
     imuArray = np.array(recvIMUData).reshape((6, 1))
     angleArray = np.array(recvAngles)
+    angleArray = angleArray[:, np.newaxis]
     angleArray = mcuToCtrlAngles(angleArray)
     
     if(isROSmode == True):
@@ -177,34 +178,36 @@ def ctrlToMcuAngles(ctrlAngles):
         received from the control system to convert them to
         the coordinate system used by the motors
     '''
-    arr = np.zeros((18,1))
+    arr = np.zeros((18,1), dtype=np.float)
     arr[:ctrlAngles.shape[0],:ctrlAngles.shape[1]] = ctrlAngles
     
     # Multiplicative transformation factor
-    m = [1, 1, 1, -1, -1, -1, -1, -1, 1, -1, -1, 1, 1, 1, -1, -1, -1, -1]
-    m = np.array(m) * 180.0 / np.pi
+    m = np.array([1, 1, 1, -1, -1, -1, -1, -1, 1, -1, -1, 1, 1, 1, -1, -1, -1, -1])
+    m = m[:, np.newaxis]
+    m = m * 180.0 / np.pi
     
     # Additive transformation factor
-    a = [150, 150, 150, 150, 150, 150, 150, 150, 150, 150, 150, 150, 150, 60, 150, 240, 150, 150]
-    a = np.array(a)
+    a = np.array([150, 150, 150, 150, 150, 150, 150, 150, 150, 150, 150, 150, 150, 60, 150, 240, 150, 150])
+    a = a[:, np.newaxis]
     
-    return m.dot(arr) + a
+    return (m * arr) + a
     
 def mcuToCtrlAngles(mcuAngles):
     ''' Applies a linear transformation to the motor angles
         received from the embedded systems to convert them to
         the coordinate system used by the control systems
     '''
-    arr = np.zeros((18,))
+    arr = np.zeros((18,1), dtype=np.float)
+    arr[:mcuAngles.shape[0],:mcuAngles.shape[1]] = mcuAngles
     
-    arr[:mcuAngles.shape[0],] = mcuAngles
     # Additive transformation factor
-    a = [150, 150, 150, 150, 150, 150, 150, 150, 150, 150, 150, 150, 150, 60, 150, 240, 150, 150]
-    a = np.array(a)
+    a = np.array([150, 150, 150, 150, 150, 150, 150, 150, 150, 150, 150, 150, 150, 60, 150, 240, 150, 150])
+    a = a[:, np.newaxis]
     
     # Multiplicative transformation factor
-    m = [1, 1, 1, -1, -1, -1, -1, -1, 1, -1, -1, 1, 1, 1, -1, -1, -1, -1]
-    m = np.array(m) * 180.0 / np.pi
+    m = np.array([1, 1, 1, -1, -1, -1, -1, -1, 1, -1, -1, 1, 1, 1, -1, -1, -1, -1])
+    m = m[:, np.newaxis]
+    m = m * 180.0 / np.pi
     
     return (arr - a) / m
 
