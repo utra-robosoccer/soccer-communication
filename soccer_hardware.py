@@ -330,6 +330,7 @@ class soccer_hardware:
 
         angles[0:6,0] = np.flipud(angles[0:6,0])
         
+        angles = ctrlToMcuAngles(angles)
         sendPacketToMCU(self.ser, vec2bytes(angles))
         receiveWithChecks(self.ser, self.isROSmode, numTransfers, angles)
     
