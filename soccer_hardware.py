@@ -143,7 +143,7 @@ def receiveWithChecks(ser, isROSmode, numTransfers, angles):
     imuArray = np.array(recvIMUData).reshape((6, 1))
     angleArray = np.array(recvAngles)
     angleArray = angleArray[:, np.newaxis]
-    angleArray = mcuToCtrlAngles(angleArray)
+    ctrlAngleArray = mcuToCtrlAngles(angleArray)
     
     if(isROSmode == True):
         ''' IMU Feedback '''
@@ -157,18 +157,17 @@ def receiveWithChecks(ser, isROSmode, numTransfers, angles):
         ''' Motor Feedback '''
         robotState = RobotState()
         for i in range(12):
-            robotState.joint_angles[i] = angleArray[i][0]
+            robotState.joint_angles[i] = ctrlAngleArray[i][0]
         
         m = getCtrlToMcuAngleMap()
         robotState.joint_angles[0:12] = np.linalg.inv(m).dot(robotState.joint_angles[0:18])[0:12]
 
         pub2.publish(robotState)
-        
     
     if(numTransfers % 50 == 0):
         print('\n')
         logString("Received valid data")
-        printAsAngles(angles[0:12], recvAngles[0:12])
+        printAsAngles(angles[0:12], angleArray[0:12])
         printAsIMUData(imuArray)
 
 def get_script_path():
