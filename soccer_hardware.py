@@ -166,7 +166,7 @@ def receiveWithChecks(ser, isROSmode, numTransfers, angles):
         # recvAngles[10] = -recvAngles[10]
         
         m = getCtrlToMcuAngleMap()
-        robotState = np.linalg.inv(m).dot(robotState)
+        robotState.joint_angles[0:18] = np.linalg.inv(m).dot(robotState.joint_angles[0:18])
 
         pub2.publish(robotState)
         
