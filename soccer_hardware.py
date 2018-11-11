@@ -158,11 +158,14 @@ def receiveWithChecks(ser, isROSmode, numTransfers, angles):
         for i in range(12):
             robotState.joint_angles[i] = recvAngles[i]
         
-        recvAngles[3] = -recvAngles[3]
-        recvAngles[4] = -recvAngles[4]
-        recvAngles[7] = -recvAngles[7]
-        recvAngles[9] = -recvAngles[9]
-        recvAngles[10] = -recvAngles[10]
+        # recvAngles[3] = -recvAngles[3]
+        # recvAngles[4] = -recvAngles[4]
+        # recvAngles[7] = -recvAngles[7]
+        # recvAngles[9] = -recvAngles[9]
+        # recvAngles[10] = -recvAngles[10]
+        
+        m = getCtrlToMcuAngleMap()
+        robotState = np.linalg.inv(m) * robotState
 
         pub2.publish(robotState)
         
@@ -322,17 +325,49 @@ class soccer_hardware:
         if not self.ser.isOpen():
             return
         angles = np.zeros((18,1))
-        angles[0:18,0] = robotGoal.trajectories[0:18]
+        m = getCtrlToMcuAngleMap()
+        angles[0:18,0] = m * robotGoal.trajectories[0:18]
         
-        angles[1,0] =-(angles[1,0])
-        angles[5,0] =-(angles[5,0])
-        angles[6,0] =-(angles[6,0])
-
-        angles[0:6,0] = np.flipud(angles[0:6,0])
+        # angles[1,0] =-(angles[1,0])
+        # angles[5,0] =-(angles[5,0])
+        # angles[6,0] =-(angles[6,0])
         
         angles = ctrlToMcuAngles(angles)
         sendPacketToMCU(self.ser, vec2bytes(angles))
         receiveWithChecks(self.ser, self.isROSmode, numTransfers, angles)
+        
+def getCtrlToMcuAngleMap():
+    m = np.zeros((18,18))
+    
+    # Right leg
+    m[0,6] = 1
+    m[1,7] = 1
+    m[2,8] = 1
+    m[3,9] = 1
+    m[4,10] = 1
+    m[5,11] = 1
+    
+    # Left leg
+    m[6,5] = 1
+    m[7,4] = 1
+    m[8,3] = 1
+    m[9,2] = 1
+    m[10,1] = 1
+    m[11,0] = 1
+    
+    #  Right arm
+    m[12,14] = 1
+    m[13,15] = 1
+    
+    # Left arm
+    m[14,16] = 1
+    m[15,17] = 1
+    
+    # Head
+    m[16,12] = 1
+    m[17,13] = 1
+    
+    return m
     
 if __name__ == "__main__":
     sh = soccer_hardware()
