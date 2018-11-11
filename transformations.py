@@ -23,7 +23,7 @@ def getCtrlToMcuAngleMap():
     # Left leg
     m[6,5] = 1
     m[7,4] = 1
-    m[8,3] = 1
+    m[8,3] = -1
     m[9,2] = -1
     m[10,1] = 1
     m[11,0] = 1
