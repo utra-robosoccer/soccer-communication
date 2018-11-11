@@ -157,13 +157,7 @@ def receiveWithChecks(ser, isROSmode, numTransfers, angles):
         ''' Motor Feedback '''
         robotState = RobotState()
         for i in range(12):
-            robotState.joint_angles[i] = recvAngles[i]
-        
-        # recvAngles[3] = -recvAngles[3]
-        # recvAngles[4] = -recvAngles[4]
-        # recvAngles[7] = -recvAngles[7]
-        # recvAngles[9] = -recvAngles[9]
-        # recvAngles[10] = -recvAngles[10]
+            robotState.joint_angles[i] = angleArray[i][0]
         
         m = getCtrlToMcuAngleMap()
         robotState.joint_angles[0:12] = np.linalg.inv(m).dot(robotState.joint_angles[0:18])[0:12]
@@ -174,7 +168,7 @@ def receiveWithChecks(ser, isROSmode, numTransfers, angles):
     if(numTransfers % 50 == 0):
         print('\n')
         logString("Received valid data")
-        printAsAngles(angles[0:12], angleArray[0:12])
+        printAsAngles(angles[0:12], recvAngles[0:12])
         printAsIMUData(imuArray)
 
 def get_script_path():
