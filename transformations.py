@@ -23,8 +23,8 @@ def getCtrlToMcuAngleMap():
     # Left leg
     m[6,5] = 1
     m[7,4] = 1
-    m[8,3] = -1
-    m[9,2] = 1
+    m[8,3] = 1
+    m[9,2] = -1
     m[10,1] = 1
     m[11,0] = 1
     
@@ -41,6 +41,44 @@ def getCtrlToMcuAngleMap():
     m[17,13] = 1
     
     return m
+    
+def ctrlToMcuAngles(ctrlAngles):
+    ''' Applies a linear transformation to the motor angles
+        received from the control system to convert them to
+        the coordinate system used by the motors
+    '''
+    arr = np.zeros((18,1), dtype=np.float)
+    arr[:ctrlAngles.shape[0],:ctrlAngles.shape[1]] = ctrlAngles
+    
+    # Multiplicative transformation factor
+    m = np.array([1, 1, 1, -1, -1, -1, -1, -1, 1, -1, -1, 1, 1, 1, -1, -1, -1, -1])
+    m = m[:, np.newaxis]
+    m = m * 180.0 / np.pi
+    
+    # Additive transformation factor
+    a = np.array([150, 150, 150, 150, 150, 150, 150, 150, 150, 150, 150, 150, 150, 60, 150, 240, 150, 150])
+    a = a[:, np.newaxis]
+    
+    return (m * arr) + a
+    
+def mcuToCtrlAngles(mcuAngles):
+    ''' Applies a linear transformation to the motor angles
+        received from the embedded systems to convert them to
+        the coordinate system used by the control systems
+    '''
+    arr = np.zeros((18,1), dtype=np.float)
+    arr[:mcuAngles.shape[0],:mcuAngles.shape[1]] = mcuAngles
+    
+    # Additive transformation factor
+    a = np.array([150, 150, 150, 150, 150, 150, 150, 150, 150, 150, 150, 150, 150, 60, 150, 240, 150, 150])
+    a = a[:, np.newaxis]
+    
+    # Multiplicative transformation factor
+    m = np.array([1, 1, 1, -1, -1, -1, -1, -1, 1, -1, -1, 1, 1, 1, -1, -1, -1, -1])
+    m = m[:, np.newaxis]
+    m = m * 180.0 / np.pi
+    
+    return (arr - a) / m
 
 class TestCtrlMcuAngleMap(unittest.TestCase):
     def test_left_leg(self):
@@ -56,8 +94,8 @@ class TestCtrlMcuAngleMap(unittest.TestCase):
         golden = np.zeros((18,))
         golden[11] = tv[0]
         golden[10] = tv[1]
-        golden[9] = tv[2]
-        golden[8] = -tv[3] # Left hip
+        golden[9] = -tv[2] # Left hip
+        golden[8] = tv[3] 
         golden[7] = tv[4]
         golden[6] = tv[5]
         

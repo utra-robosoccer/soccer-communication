@@ -26,7 +26,7 @@ try:
     from geometry_msgs.msg import Quaternion
     from tf.msg import tfMessage
     from tf.transformations import quaternion_from_euler
-    from transformations import getCtrlToMcuAngleMap
+    from transformations import *
 except:
     print("No ROS")
 
@@ -166,7 +166,7 @@ def receiveWithChecks(ser, isROSmode, numTransfers, angles):
         # recvAngles[10] = -recvAngles[10]
         
         m = getCtrlToMcuAngleMap()
-        robotState.joint_angles[0:18] = np.linalg.inv(m).dot(robotState.joint_angles[0:18])
+        robotState.joint_angles[0:12] = np.linalg.inv(m).dot(robotState.joint_angles[0:18])[0:12]
 
         pub2.publish(robotState)
         
@@ -176,44 +176,6 @@ def receiveWithChecks(ser, isROSmode, numTransfers, angles):
         logString("Received valid data")
         printAsAngles(angles[0:12], angleArray[0:12])
         printAsIMUData(imuArray)
-        
-def ctrlToMcuAngles(ctrlAngles):
-    ''' Applies a linear transformation to the motor angles
-        received from the control system to convert them to
-        the coordinate system used by the motors
-    '''
-    arr = np.zeros((18,1), dtype=np.float)
-    arr[:ctrlAngles.shape[0],:ctrlAngles.shape[1]] = ctrlAngles
-    
-    # Multiplicative transformation factor
-    m = np.array([1, 1, 1, -1, -1, -1, -1, -1, 1, -1, -1, 1, 1, 1, -1, -1, -1, -1])
-    m = m[:, np.newaxis]
-    m = m * 180.0 / np.pi
-    
-    # Additive transformation factor
-    a = np.array([150, 150, 150, 150, 150, 150, 150, 150, 150, 150, 150, 150, 150, 60, 150, 240, 150, 150])
-    a = a[:, np.newaxis]
-    
-    return (m * arr) + a
-    
-def mcuToCtrlAngles(mcuAngles):
-    ''' Applies a linear transformation to the motor angles
-        received from the embedded systems to convert them to
-        the coordinate system used by the control systems
-    '''
-    arr = np.zeros((18,1), dtype=np.float)
-    arr[:mcuAngles.shape[0],:mcuAngles.shape[1]] = mcuAngles
-    
-    # Additive transformation factor
-    a = np.array([150, 150, 150, 150, 150, 150, 150, 150, 150, 150, 150, 150, 150, 60, 150, 240, 150, 150])
-    a = a[:, np.newaxis]
-    
-    # Multiplicative transformation factor
-    m = np.array([1, 1, 1, -1, -1, -1, -1, -1, 1, -1, -1, 1, 1, 1, -1, -1, -1, -1])
-    m = m[:, np.newaxis]
-    m = m * 180.0 / np.pi
-    
-    return (arr - a) / m
 
 def get_script_path():
     return os.path.dirname(os.path.realpath(sys.argv[0]))
