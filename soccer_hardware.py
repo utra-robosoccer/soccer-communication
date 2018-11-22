@@ -26,6 +26,7 @@ try:
     from geometry_msgs.msg import Quaternion
     from tf.msg import tfMessage
     from tf.transformations import quaternion_from_euler
+    from transformations import *
 except:
     print("No ROS")
 
@@ -93,9 +94,9 @@ def printAsIMUData(vec1):
     
     t = PrettyTable(['', 'Gyro (deg/s)', 'Accel (m/s^2)'])
     
-    t.add_row(["X", round(vec1[0][0], 2), round(vec1[3][0], 2)])
-    t.add_row(["Y", round(vec1[1][0], 2), round(vec1[4][0], 2)])
-    t.add_row(["Z", round(vec1[2][0], 2), round(vec1[5][0], 2)])
+    t.add_row(["X", round(vec1[0], 2), round(vec1[3], 2)])
+    t.add_row(["Y", round(vec1[1], 2), round(vec1[4], 2)])
+    t.add_row(["Z", round(vec1[2], 2), round(vec1[5], 2)])
     
     print(t)
     
@@ -140,6 +141,9 @@ def receiveWithChecks(ser, isROSmode, numTransfers, angles):
                                             decodeHeader=False)
 
     imuArray = np.array(recvIMUData).reshape((6, 1))
+    angleArray = np.array(recvAngles)
+    angleArray = angleArray[:, np.newaxis]
+    ctrlAngleArray = mcuToCtrlAngles(angleArray)
     
     if(isROSmode == True):
         ''' IMU Feedback '''
@@ -152,25 +156,19 @@ def receiveWithChecks(ser, isROSmode, numTransfers, angles):
         
         ''' Motor Feedback '''
         robotState = RobotState()
-        for i in range(0,12):
-			recvAngles[i] = (recvAngles[i] - 150) / 180 * 3.1415926
-			robotState.joint_angles[i] = recvAngles[i]
-		
-        recvAngles[3] = -recvAngles[3]
-        recvAngles[4] = -recvAngles[4]
-        recvAngles[7] = -recvAngles[7]
-        recvAngles[9] = -recvAngles[9]
-        recvAngles[10] = -recvAngles[10]
+        for i in range(12):
+            robotState.joint_angles[i] = ctrlAngleArray[i][0]
+        
+        m = getCtrlToMcuAngleMap()
+        robotState.joint_angles[0:12] = np.linalg.inv(m).dot(robotState.joint_angles[0:18])[0:12]
 
         pub2.publish(robotState)
-        
     
     if(numTransfers % 50 == 0):
-        
         print('\n')
         logString("Received valid data")
-        printAsAngles(angles[0:12], np.array(recvAngles).reshape((12, 1)))
-        printAsIMUData(np.array(recvIMUData).reshape((6, 1)))
+        printAsAngles(angles[0:12], angleArray[0:12])
+        printAsIMUData(imuArray)
 
 def get_script_path():
     return os.path.dirname(os.path.realpath(sys.argv[0]))
@@ -265,8 +263,10 @@ class soccer_hardware:
                 for i in range(self.trajectory.shape[1]):
                     angles = self.trajectory[:, i:i+1]
                     
+                    angles = ctrlToMcuAngles(angles)
                     sendPacketToMCU(self.ser, vec2bytes(angles))
                     numTransfers = numTransfers + 1
+                    
                     receiveWithChecks(self.ser, self.isROSmode, numTransfers, angles)
                     
         except serial.serialutil.SerialException as e:
@@ -281,16 +281,14 @@ class soccer_hardware:
         if not self.ser.isOpen():
             return
         angles = np.zeros((18,1))
-        angles[0:18,0] = robotGoal.trajectories[0:18]
         
-        angles[1,0] =-(angles[1,0])
-        angles[5,0] =-(angles[5,0])
-        angles[6,0] =-(angles[6,0])
+        m = getCtrlToMcuAngleMap()
+        angles[0:18,0] = m.dot(robotGoal.trajectories[0:18])
 
-        angles[0:6,0] = np.flipud(angles[0:6,0])
-        
+        angles = ctrlToMcuAngles(angles)
         sendPacketToMCU(self.ser, vec2bytes(angles))
         receiveWithChecks(self.ser, self.isROSmode, numTransfers, angles)
+
     
 if __name__ == "__main__":
     sh = soccer_hardware()
