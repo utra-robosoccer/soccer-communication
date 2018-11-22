@@ -92,12 +92,12 @@ class TestCtrlMcuAngleMap(unittest.TestCase):
         tv[5] = 1
         
         golden = np.zeros((18,))
-        golden[11] = tv[0]
-        golden[10] = tv[1]
-        golden[9] = -tv[2] # Left hip
-        golden[8] = tv[3] 
-        golden[7] = tv[4]
-        golden[6] = tv[5]
+        golden[11] = tv[5]
+        golden[10] = tv[4]
+        golden[9] = tv[3]
+        golden[8] = tv[2] 
+        golden[7] = -tv[1]
+        golden[6] = tv[0]
         
         result = m.dot(tv)
         np.testing.assert_array_equal(result, golden)
@@ -113,12 +113,12 @@ class TestCtrlMcuAngleMap(unittest.TestCase):
         tv[11] = 1
         
         golden = np.zeros((18,))
-        golden[0] = tv[6]
-        golden[1] = tv[7]
-        golden[2] = -tv[8] # Right hip
-        golden[3] = tv[9]
-        golden[4] = tv[10]
-        golden[5] = tv[11]
+        golden[0] = -tv[11]
+        golden[1] = tv[10]
+        golden[2] = tv[9]
+        golden[3] = tv[8]
+        golden[4] = -tv[7]
+        golden[5] = -tv[6]
         
         result = m.dot(tv)
         np.testing.assert_array_equal(result, golden)
