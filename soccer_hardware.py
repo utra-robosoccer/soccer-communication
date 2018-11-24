@@ -188,7 +188,7 @@ class soccer_hardware:
         parser.add_argument(
             '--port',
             help='Specifies the port argument to the serial.Serial constructor. Default: /dev/ttyUSB0',
-            default='/dev/ttyUSB0'
+            default='/dev/ttyACM0'
         )
         
         parser.add_argument(
