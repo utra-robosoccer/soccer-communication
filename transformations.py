@@ -26,7 +26,7 @@ def getCtrlToMcuAngleMap():
     m[8,2] = 1
     m[9,3] = 1
     m[10,4] = 1
-    m[11,5] = 1
+    m[11,5] = -1
     
     #  Right arm
     m[12,12] = 1
@@ -92,7 +92,7 @@ class TestCtrlMcuAngleMap(unittest.TestCase):
         tv[5] = 1
         
         golden = np.zeros((18,))
-        golden[11] = tv[5]
+        golden[11] = -tv[5]
         golden[10] = tv[4]
         golden[9] = tv[3]
         golden[8] = tv[2] 
