@@ -12,21 +12,21 @@ def getCtrlToMcuAngleMap():
     '''
     m = np.zeros((18,18))
     
-    # Right leg
+    # Right leg (Jason's Left)
     m[0,11] = -1
     m[1,10] = 1
     m[2,9] = 1
     m[3,8] = 1
     m[4,7] = -1
-    m[5,6] = -1
+    m[5,6] = 1
     
-    # Left leg
+    # Left leg (Jason's Right)
     m[6,0] = 1
     m[7,1] = -1
     m[8,2] = 1
     m[9,3] = 1
     m[10,4] = 1
-    m[11,5] = 1
+    m[11,5] = -1
     
     #  Right arm
     m[12,12] = 1
