@@ -92,7 +92,7 @@ class TestCtrlMcuAngleMap(unittest.TestCase):
         tv[5] = 1
         
         golden = np.zeros((18,))
-        golden[11] = tv[5]
+        golden[11] = -tv[5]
         golden[10] = tv[4]
         golden[9] = tv[3]
         golden[8] = tv[2] 
