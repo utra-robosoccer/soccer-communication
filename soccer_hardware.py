@@ -30,7 +30,7 @@ try:
     from transformations import *
 except:
     has_ros = False
-    print("No ROS")
+    print("ROS is not installed")
 
 def rxDecoder(raw):
     ''' Decodes raw bytes received from the microcontroller. As per the agreed
@@ -162,26 +162,35 @@ class soccer_hardware:
         parser.add_argument(
             '-r',
             '--ros',
-            help='Imports ROS-related dependencies if True or omitted. Default: '
-                 'True if you have ROS installed, otherwise false',
+            help='Subscribes and publishes to ROS nodes (event-based). This is '
+                 'the flow used on the actual robot. Default: True if you have '
+                 'ROS installed, otherwise false',
             default=True
         )
         parser.add_argument(
             '--port',
-            help='Specifies the port argument to the serial.Serial constructor. Default: /dev/ttyUSB0',
+            help='The serial port used for communication. Default: /dev/ttyUSB0',
             default='/dev/ttyACM0'
         )
         
         parser.add_argument(
             '--baud',
-            help='Specifies the serial port baud rate. Default: 230400',
+            help='Serial port baud rate. Default: 230400',
             default=230400
         )
         
         parser.add_argument(
             '--traj',
-            help='Specifies the trajectory to use by default. Default: standing.csv',
+            help='The trajectory to be used, if not in ROS mode. Default: '
+                 'standing.csv',
             default='standing.csv'
+        )
+        
+        parser.add_argument(
+            '--step',
+            help='Causes goal angles to be sent when enter is pressed, if not '
+                 'in ROS mode. Default: False',
+            default=False
         )
         
         parser.add_argument(
@@ -202,14 +211,17 @@ class soccer_hardware:
         self.port = args['port']
         self.baud = args['baud']
         self.traj = args['traj']
+        self.step = args['step']
         self.num_transmissions = 0
         self.num_receptions = 0
         self.last_print_time = time.time()
         
         logString("Started with ROS = {0}".format(self.isROSmode))
+    
+    def open_trajectory(self):
+        success = False
         logString("Attempting to open trajectory file \'{0}\'".format(self.traj))
         trajectories_dir = os.path.join("trajectories", self.traj)
-        
         try:
             self.trajectory = np.loadtxt(
                 open(trajectories_dir, "rb"),
@@ -217,13 +229,14 @@ class soccer_hardware:
                 skiprows=0
             )
             
-            logString("Initialized soccer hardware with trajectory {0}".format(
-                    self.traj
-                )
-            )
+            logString("Initialized soccer hardware with trajectory {0}".format(self.traj))
+            success = True
         except FileNotFoundError as err:
             logString("Could not open trajectory: {0}. Is your Python shell "
-                      "running in the soccer-communication directory?".format(err))
+                    "running in the soccer-communication directory?".format(err))
+            logString("Will send standing pose instead...")
+        return success
+            
                 
     def connect_to_embedded(self):
         logString(
@@ -232,7 +245,6 @@ class soccer_hardware:
                 self.baud
             )
         )
-        
         num_tries = 0
         while(1):
             try:
@@ -243,7 +255,6 @@ class soccer_hardware:
                     logString("Connection failed. Retrying...(attempt {0})".format(num_tries))
                 time.sleep(0.01)
                 num_tries = num_tries + 1
-            
         logString("Connected")
 
     def transmit(self, goal_angles):
@@ -339,13 +350,22 @@ if __name__ == "__main__":
         pub2 = rospy.Publisher('soccerbot/robotState', RobotState, queue_size=1)
         rospy.spin() 
     else:
+        open_success = sh.open_trajectory()
         while(True):
-            # Iterate through the static trajectory forever...
-            # TODO: If the static trajectories are ever re-generated, we will need
-            # TODO: to dot the trajectories with the ctrlToMcuAngleMap to shuffle
-            # TODO: them properly
-            for i in range(self.trajectory.shape[1]):
-                goal_angles = self.trajectory[:, i:i+1]
-                sh.communicate(goal_angles)
+            if(open_success):
+                # Iterate through the static trajectory forever...
+                # TODO: If the static trajectories are ever re-generated, we will need
+                # TODO: to dot the trajectories with the ctrlToMcuAngleMap to shuffle
+                # TODO: them properly
+                for i in range(self.trajectory.shape[1]):
+                    if(self.step):
+                        wait = input('Press enter to send next pose')
+                    goal_angles = self.trajectory[:, i:i+1]
+                    sh.communicate(goal_angles)
+            else:
+                if(self.step):
+                    wait = input('Press enter to send next pose')
+                # Send standing pose
+                sh.communicate(np.zeros((18,1)))
     
     sys.exit(0)
