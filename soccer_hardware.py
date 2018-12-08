@@ -17,6 +17,7 @@ import struct
 from datetime import datetime
 from prettytable import PrettyTable
 
+has_ros = True
 try:
     import rospy
     from soccer_msgs.msg import RobotGoal
@@ -28,9 +29,10 @@ try:
     from tf.transformations import quaternion_from_euler
     from transformations import *
 except:
+    has_ros = False
     print("No ROS")
 
-def rxDecoder(raw, decodeHeader=True):
+def rxDecoder(raw):
     ''' Decodes raw bytes received from the microcontroller. As per the agreed
         upon protocol, the first 4 bytes are for a header while the remaining
         80 bytes contain floats for each motor.
@@ -106,69 +108,47 @@ def receivePacketFromMCU(ser):
         32-bit floats.
     '''
     
-    BUFF_SIZE = 4
+    receive_succeeded = False
+    
     totalBytesRead = 0
     startSeqCount = 0
     buff = bytes(''.encode())
     
+    timeout = 0.01 # 10 ms timeout
+    time_start = time.time()
+    time_curr = time_start
     while(True):
-        while(ser.in_waiting < BUFF_SIZE):
+        # First, we wait until we have received some data, or until the timeout
+        # has elapsed
+        while((num_bytes_available == 0) and (time_curr - time.start < timeout)):
             time.sleep(0.001)
-        rawData = ser.read(BUFF_SIZE)
+            time_curr = time.time()
+            num_bytes_available = ser.in_waiting
         
-        for i in range(BUFF_SIZE):
-            if(startSeqCount == 4):
-                buff = buff + rawData[i:i+1]
-                totalBytesRead = totalBytesRead + 1
-                if(totalBytesRead == 84):
-                    break
-            else:
-                if(struct.unpack('<B', rawData[i:i+1])[0] == 0xFF):
-                    startSeqCount = startSeqCount + 1
-                else:
-                    startSeqCount = 0
-        if(totalBytesRead == 84):
+        if((time_curr - time.start) >= timeout):
+            # Treat timeout as hard requirement
             break
-    return buff
-    
-def receiveWithChecks(ser, isROSmode, numTransfers, angles):
-    ''' Receives a packet from the MCU and performs basic checks on the packet
-        for data integrity. Also decodes the packet and prints a data readout 
-        every so often.
-    '''
-    
-    (recvAngles, recvIMUData) = rxDecoder(receivePacketFromMCU(ser),
-                                            decodeHeader=False)
-
-    imuArray = np.array(recvIMUData).reshape((6, 1))
-    angleArray = np.array(recvAngles)
-    angleArray = angleArray[:, np.newaxis]
-    ctrlAngleArray = mcuToCtrlAngles(angleArray)
-    
-    if(isROSmode == True):
-        ''' IMU Feedback '''
-        imu = Imu()
-        vec1 = Vector3(-imuArray[2][0], imuArray[1][0], imuArray[0][0])
-        imu.angular_velocity = vec1
-        vec2 = Vector3(imuArray[5][0], imuArray[4][0], imuArray[3][0])
-        imu.linear_acceleration = vec2
-        pub.publish(imu)
-        
-        ''' Motor Feedback '''
-        robotState = RobotState()
-        for i in range(12):
-            robotState.joint_angles[i] = ctrlAngleArray[i][0]
-        
-        m = getCtrlToMcuAngleMap()
-        robotState.joint_angles[0:12] = np.linalg.inv(m).dot(robotState.joint_angles[0:18])[0:12]
-
-        pub2.publish(robotState)
-    
-    if(numTransfers % 50 == 0):
-        print('\n')
-        logString("Received valid data")
-        printAsAngles(angles[0:12], angleArray[0:12])
-        printAsIMUData(imuArray)
+        else:
+            # If we receive some data, we process it here then go back to
+            # waiting for more
+            rawData = ser.read(num_bytes_available)
+            
+            for i in range(num_bytes_available):
+                if(startSeqCount == 4):
+                    buff = buff + rawData[i:i+1]
+                    totalBytesRead = totalBytesRead + 1
+                    
+                    if(totalBytesRead == 84):
+                        # If we get here, we have received a full packet
+                        receive_succeeded = True
+                        break
+                else:
+                    if(struct.unpack('<B', rawData[i:i+1])[0] == 0xFF):
+                        startSeqCount = startSeqCount + 1
+                    else:
+                        startSeqCount = 0
+            
+    return (receive_succeeded, buff)
 
 def get_script_path():
     return os.path.dirname(os.path.realpath(sys.argv[0]))
@@ -182,7 +162,8 @@ class soccer_hardware:
         parser.add_argument(
             '-r',
             '--ros',
-            help='Imports ROS-related dependencies if True or omitted. Default: True',
+            help='Imports ROS-related dependencies if True or omitted. Default: '
+                 'True if you have ROS installed, otherwise false',
             default=True
         )
         parser.add_argument(
@@ -217,30 +198,34 @@ class soccer_hardware:
         
         args = vars(parser.parse_args())
         
-        self.isROSmode = args['ros']
+        self.isROSmode = args['ros'] and has_ros
         self.port = args['port']
         self.baud = args['baud']
         self.traj = args['traj']
+        self.num_transmissions = 0
+        self.num_receptions = 0
+        self.last_print_time = time.time()
         
-        
-        logString("Started with ROS = {0}".format(args['ros'] == True))
-        
+        logString("Started with ROS = {0}".format(self.isROSmode))
         logString("Attempting to open trajectory file \'{0}\'".format(self.traj))
-        
         trajectories_dir = os.path.join("trajectories", self.traj)
         
-        self.trajectory = np.loadtxt(
-            open(trajectories_dir, "rb"),
-            delimiter=",",
-            skiprows=0
-        )
-        
-        logString("Initialized soccer hardware with trajectory {0}".format(
-                self.traj
+        try:
+            self.trajectory = np.loadtxt(
+                open(trajectories_dir, "rb"),
+                delimiter=",",
+                skiprows=0
             )
-        )
+            
+            logString("Initialized soccer hardware with trajectory {0}".format(
+                    self.traj
+                )
+            )
+        except FileNotFoundError as err:
+            logString("Could not open trajectory: {0}. Is your Python shell "
+                      "running in the soccer-communication directory?".format(err))
                 
-    def connectToEmbedded(self):
+    def connect_to_embedded(self):
         logString(
             "Attempting connection to embedded systems via port {0} with baud rate {1}".format(
                 self.port,
@@ -248,59 +233,119 @@ class soccer_hardware:
             )
         )
         
-        try:
-            self.ser = serial.Serial(self.port, self.baud,timeout=100)
-        except:
-            logString("Connection failed. Exiting")
-            sys.exit(1)
+        num_tries = 0
+        while(1):
+            try:
+                self.ser = serial.Serial(self.port, self.baud,timeout=100)
+                self.ser.open()
+            except:
+                if(num_tries % 100 == 0):
+                    logString("Connection failed. Retrying...(attempt {0})".format(num_tries))
+                time.sleep(0.01)
+                num_tries = num_tries + 1
             
         logString("Connected")
+
+    def transmit(self, goal_angles):
+        # Convert motor array from the coordinate system used by controls to
+        # that used by embedded
+        self.goal_angles = ctrlToMcuAngles(goal_angles)
         
-    def loopTrajectory(self):
-        numTransfers = 0
-        try:
-            while(self.ser.isOpen()):
-                for i in range(self.trajectory.shape[1]):
-                    angles = self.trajectory[:, i:i+1]
-                    
-                    angles = ctrlToMcuAngles(angles)
-                    sendPacketToMCU(self.ser, vec2bytes(angles))
-                    numTransfers = numTransfers + 1
-                    
-                    receiveWithChecks(self.ser, self.isROSmode, numTransfers, angles)
-                    
-        except serial.serialutil.SerialException as e:
-            logString("Serial exception {0}. Exiting".format(e))
-            sys.exit(1)
-        except Exception as e:
-            logString(str(e))
-            sys.exit(1)
+        # Send over serial
+        sendPacketToMCU(self.ser, vec2bytes(self.goal_angles))
+        self.num_transmissions = self.num_transmissions + 1
+        
+    def receive(self):
+        (receive_succeeded, buff) = receivePacketFromMCU(self.ser)
+        if(receive_succeeded):
+            # If our reception was successful, we update the class variables
+            # for the received angles and received IMU data. Otherwise, we
+            # just send back the last values we got successfully
+            (recvAngles, recvIMUData) = rxDecoder(buff)
+            
+            angleArray = np.array(recvAngles)
+            self.received_angles = angleArray[:, np.newaxis]
+            self.received_imu = np.array(recvIMUData).reshape((6, 1))
+            self.num_receptions = self.num_receptions + 1
+        
+        if(self.isROSmode):
+            self.publish_sensor_data()
+            
+    def publish_sensor_data(self):
+        ''' IMU Feedback '''
+        imu = Imu()
+        vec1 = Vector3(-self.received_imu[2][0], self.received_imu[1][0], self.received_imu[0][0])
+        imu.angular_velocity = vec1
+        vec2 = Vector3(self.received_imu[5][0], self.received_imu[4][0], self.received_imu[3][0])
+        imu.linear_acceleration = vec2
+        pub.publish(imu)
+        
+        ''' Motor Feedback '''
+        # Convert motor array from the embedded coordinate system to that
+        # used by controls
+        ctrlAngleArray = mcuToCtrlAngles(self.received_angles)
+                
+        robotState = RobotState()
+        for i in range(12):
+            robotState.joint_angles[i] = ctrlAngleArray[i][0]
+        
+        # Convert motor array from the embedded order and sign convention
+        # to that used by controls
+        m = getCtrlToMcuAngleMap()
+        robotState.joint_angles[0:12] = np.linalg.inv(m).dot(robotState.joint_angles[0:18])[0:12]
+
+        pub2.publish(robotState)
+            
+    def print_handler(self):
+        current_time = time.time()
+        if(current_time - self.last_print_time >= 1):
+            self.last_print_time = current_time
+            print('\n')
+            logString("Received: {0}\n".format(self.num_receptions))
+            logString("Transmitted: {0}\n".format(self.num_transmissions))
+            printAsAngles(self.goal_angles[0:12], self.received_angles[0:12])
+            printAsIMUData(self.received_imu)
+            
+    def communicate(self, goal_angles):
+        while not success:
+            # This variable is just used to see whether we run into an exception
+            success = False
+            try:
+                self.transmit(goal_angles)
+                self.receive()
+                self.print_handler()
+                success = True
+            
+            except serial.serialutil.SerialException as e:
+                self.ser.close()
+                logString("Serial exception {0}. Closed port. Retrying connection".format(e))
+                self.connectToEmbedded()
 
     def trajectory_callback(self, robotGoal):
-        numTransfers = 0
-        if not self.ser.isOpen():
-            return
-        angles = np.zeros((18,1))
-        
+        # Convert motor array from the order and sign convention used by
+        # controls to that used by embedded
         m = getCtrlToMcuAngleMap()
-        angles[0:18,0] = m.dot(robotGoal.trajectories[0:18])
-
-        angles = ctrlToMcuAngles(angles)
-        sendPacketToMCU(self.ser, vec2bytes(angles))
-        receiveWithChecks(self.ser, self.isROSmode, numTransfers, angles)
-
+        goalangles[0:18,0] = m.dot(robotGoal.trajectories[0:18])
+        self.communicate(goal_angles)
     
 if __name__ == "__main__":
     sh = soccer_hardware()
-    sh.connectToEmbedded()
+    sh.connect_to_embedded()
     
-    if(sh.isROSmode == True):
+    if(sh.isROSmode):
         rospy.init_node('soccer_hardware', anonymous=True)
         rospy.Subscriber("robotGoal", RobotGoal, sh.trajectory_callback, queue_size=1)
         pub = rospy.Publisher('soccerbot/imu', Imu, queue_size=1)
         pub2 = rospy.Publisher('soccerbot/robotState', RobotState, queue_size=1)
         rospy.spin() 
     else:
-        sh.loopTrajectory()
+        while(True):
+            # Iterate through the static trajectory forever...
+            # TODO: If the static trajectories are ever re-generated, we will need
+            # TODO: to dot the trajectories with the ctrlToMcuAngleMap to shuffle
+            # TODO: them properly
+            for i in range(self.trajectory.shape[1]):
+                goal_angles = self.trajectory[:, i:i+1]
+                sh.communicate(goal_angles)
     
-    sys.exit(0)      
+    sys.exit(0)
