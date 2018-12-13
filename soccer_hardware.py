@@ -18,6 +18,8 @@ import struct
 from datetime import datetime
 from prettytable import PrettyTable
 
+from transformations import *
+
 has_ros = True
 try:
     import rospy
@@ -28,7 +30,7 @@ try:
     from geometry_msgs.msg import Quaternion
     from tf.msg import tfMessage
     from tf.transformations import quaternion_from_euler
-    from transformations import *
+    
 except:
     has_ros = False
 
@@ -154,9 +156,9 @@ class Transmitter:
         Converts the motor array from the coordinate system used by controls to
         that used by embedded and sends it to the MCU over serial
         '''
-        self.goal_angles = ctrlToMcuAngles(goal_angles)
+        goal_angles = ctrlToMcuAngles(goal_angles)
         
-        send_packet_to_mcu(vec2bytes(self.goal_angles))
+        self.send_packet_to_mcu(self.vec2bytes(goal_angles))
         self.num_transmissions = self.num_transmissions + 1
         
 class Receiver:
@@ -182,7 +184,7 @@ class Receiver:
             imu.append(struct.unpack('<f', raw[52 + i * 4: 56 + i * 4])[0])
         return (motors, imu)
         
-    def receive_packet_from_MCU(self):
+    def receive_packet_from_mcu(self):
         '''
         Receives 80 bytes of the MCU provided that there is a valid 4-byte 
         header attached to the front. Returns the list of data interpreted as
@@ -198,22 +200,23 @@ class Receiver:
         timeout = 0.01 # 10 ms timeout
         time_start = time.time()
         time_curr = time_start
+        
+        num_bytes_available = 0
         while(True):
             # First, we wait until we have received some data, or until the timeout
             # has elapsed
-            while((num_bytes_available == 0) and (time_curr - time.start < timeout)):
+            while((num_bytes_available == 0) and (time_curr - time_start < timeout)):
                 time.sleep(0.001)
                 time_curr = time.time()
                 num_bytes_available = self.ser.in_waiting
             
-            if((time_curr - time.start) >= timeout):
+            if((time_curr - time_start) >= timeout):
                 # Treat timeout as hard requirement
                 break
             else:
                 # If we receive some data, we process it here then go back to
                 # waiting for more
                 rawData = self.ser.read(num_bytes_available)
-                
                 for i in range(num_bytes_available):
                     if(startSeqCount == 4):
                         buff = buff + rawData[i:i+1]
@@ -228,7 +231,8 @@ class Receiver:
                             startSeqCount = startSeqCount + 1
                         else:
                             startSeqCount = 0
-                
+                num_bytes_available = 0
+                            
         return (receive_succeeded, buff)
         
     def publish_sensor_data(self):
@@ -257,7 +261,7 @@ class Receiver:
         pub2.publish(robotState)
         
     def receive(self):
-        (receive_succeeded, buff) = receive_packet_from_MCU()
+        (receive_succeeded, buff) = self.receive_packet_from_mcu()
         if(receive_succeeded):
             # If our reception was successful, we update the class variables
             # for the received angles and received IMU data. Otherwise, we
@@ -274,10 +278,10 @@ class Receiver:
         
 class Comm:
     def __init__(self):
-        self.first = first
+        self.first = True
         self.last_print_time = time.time()
         
-    def start_up(ser, ros_is_on, traj, step_is_on):
+    def start_up(self, ser, ros_is_on, traj, step_is_on):
         self.ser = ser
         self.ros_is_on = ros_is_on
         self.step_is_on = step_is_on
@@ -292,6 +296,7 @@ class Comm:
                 rospy.Subscriber("robotGoal", RobotGoal, sh.trajectory_callback, queue_size=1)
                 pub = rospy.Publisher('soccerbot/imu', Imu, queue_size=1)
                 pub2 = rospy.Publisher('soccerbot/robotState', RobotState, queue_size=1)
+                self.first = False
         else:
             trajectories_dir = os.path.join("trajectories", traj)
             try:
@@ -301,9 +306,9 @@ class Comm:
                     skiprows=0
                 )
                 
-                logString("Opened trajectory {0}".format(self.traj))
+                logString("Opened trajectory {0}".format(traj))
                 self.use_trajectory = True
-            except FileNotFoundError as err:
+            except IOError as err:
                 logString("Error: Could not open trajectory: {0}".format(err))
                 logString("(Is your shell running in the soccer-communication directory?)")
                 logString("Standing pose will be sent instead...")
@@ -333,20 +338,20 @@ class Comm:
         
         print(t)
 
-    def print_handler(self):
+    def print_handler(self, goal_angles):
         current_time = time.time()
         if(current_time - self.last_print_time >= 1):
             self.last_print_time = current_time
             print('\n')
-            logString("Received: {0}\n".format(self.rx.num_receptions))
+            logString("Received: {0}".format(self.rx.num_receptions))
             logString("Transmitted: {0}\n".format(self.tx.num_transmissions))
-            print_angles(self.goal_angles[0:12], self.rx.received_angles[0:12])
-            print_imu(self.rx.received_imu)
+            self.print_angles(goal_angles[0:12], self.rx.received_angles[0:12])
+            self.print_imu(self.rx.received_imu)
     
     def communicate(self, goal_angles):
         self.tx.transmit(goal_angles)
         self.rx.receive()
-        self.print_handler()
+        self.print_handler(goal_angles)
     
     def trajectory_callback(self, robotGoal):
         '''
@@ -358,7 +363,7 @@ class Comm:
         self.communicate(goal_angles)
     
     def begin_event_loop(self):
-        if(ros):
+        if(self.ros_is_on):
             rospy.spin() 
         else:
             while(True):
@@ -375,7 +380,7 @@ class Comm:
                         self.communicate(goal_angles)
                 else:
                      # Send standing pose
-                    if(self.step):
+                    if(self.step_is_on):
                         wait = input('Press enter to send next pose')
 
                     self.communicate(np.zeros((18,1)))
@@ -384,7 +389,7 @@ def main():
     args = parse_args()
     
     ros_is_on = args['ros']
-    port = args['port']
+    port = 'COM3' #args['port']
     baud = args['baud']
     traj = args['traj']
     step_is_on = args['step']
@@ -402,7 +407,7 @@ def main():
             with serial.Serial(port, baud, timeout=0) as ser:
                 logString("Connected")
                 comm.start_up(ser, ros_is_on, traj, step_is_on)
-                comm.begin_event_loop(traj, step_is_on)
+                comm.begin_event_loop()
         
         except serial.serialutil.SerialException as e:
             if(num_tries % 100 == 0):
