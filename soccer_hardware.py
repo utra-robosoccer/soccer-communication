@@ -127,6 +127,9 @@ class Transmitter:
     def __init__(self, ser):
         self.ser = ser
         self.num_transmissions = 0
+    
+    def change_port(self, ser):
+        self.ser = ser
         
     def send_packet_to_mcu(self, byteStream):
         ''' Sends bytes to the MCU with the header sequence attached.
@@ -166,6 +169,9 @@ class Receiver:
         self.ser = ser
         self.ros_is_on = ros_is_on
         self.num_receptions = 0
+        
+    def change_port(self, ser):
+        self.ser = ser
         
     def decode(self, raw):
         ''' Decodes raw bytes received from the microcontroller. As per the agreed
@@ -278,10 +284,17 @@ class Receiver:
 class Comm:
     def __init__(self):
         self.first = True
-        self.last_print_time = time.time()
         
     def start_up(self, ser, ros_is_on, traj, step_is_on):
-        self.ser = ser
+        self.last_print_time = time.time()
+        
+        if(not self.first):
+            self.ser = ser
+            self.tx.change_port(ser)
+            self.rx.change_port(ser)
+            return
+        
+        self.first = False
         self.ros_is_on = ros_is_on
         self.step_is_on = step_is_on
         self.use_trajectory = False
@@ -290,12 +303,10 @@ class Comm:
         self.rx = Receiver(ser, ros_is_on)
         
         if(self.ros_is_on):
-            if(self.first):
-                rospy.init_node('soccer_hardware', anonymous=True)
-                rospy.Subscriber("robotGoal", RobotGoal, sh.trajectory_callback, queue_size=1)
-                pub = rospy.Publisher('soccerbot/imu', Imu, queue_size=1)
-                pub2 = rospy.Publisher('soccerbot/robotState', RobotState, queue_size=1)
-                self.first = False
+            rospy.init_node('soccer_hardware', anonymous=True)
+            rospy.Subscriber("robotGoal", RobotGoal, sh.trajectory_callback, queue_size=1)
+            pub = rospy.Publisher('soccerbot/imu', Imu, queue_size=1)
+            pub2 = rospy.Publisher('soccerbot/robotState', RobotState, queue_size=1)
         else:
             trajectories_dir = os.path.join("trajectories", traj)
             try:
@@ -339,7 +350,7 @@ class Comm:
 
     def print_handler(self, goal_angles):
         current_time = time.time()
-        if(current_time - self.last_print_time >= 1):
+        if((self.rx.num_receptions > 0) and (current_time - self.last_print_time >= 1)):
             self.last_print_time = current_time
             print('\n')
             logString("Received: {0}".format(self.rx.num_receptions))
