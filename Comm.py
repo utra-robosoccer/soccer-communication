@@ -43,7 +43,7 @@ class Comm:
         
         if(self.ros_is_on):
             rospy.init_node('soccer_hardware', anonymous=True)
-            rospy.Subscriber("robotGoal", RobotGoal, sh.trajectory_callback, queue_size=1)
+            rospy.Subscriber("robotGoal", RobotGoal, self.trajectory_callback, queue_size=1)
             pub = rospy.Publisher('soccerbot/imu', Imu, queue_size=1)
             pub2 = rospy.Publisher('soccerbot/robotState', RobotState, queue_size=1)
         else:
