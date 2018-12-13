@@ -350,13 +350,15 @@ class Comm:
 
     def print_handler(self, goal_angles):
         current_time = time.time()
-        if((self.rx.num_receptions > 0) and (current_time - self.last_print_time >= 1)):
+        if(current_time - self.last_print_time >= 1):
             self.last_print_time = current_time
             print('\n')
             logString("Received: {0}".format(self.rx.num_receptions))
             logString("Transmitted: {0}\n".format(self.tx.num_transmissions))
-            self.print_angles(goal_angles[0:12], self.rx.received_angles[0:12])
-            self.print_imu(self.rx.received_imu)
+            if(self.rx.num_receptions > 0):
+                # Prints the last valid data received
+                self.print_angles(goal_angles[0:12], self.rx.received_angles[0:12])
+                self.print_imu(self.rx.received_imu)
     
     def communicate(self, goal_angles):
         self.tx.transmit(goal_angles)
