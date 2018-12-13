@@ -8,6 +8,7 @@ Author: Tyler and Jason
 
 import argparse
 import serial
+import serial.tools.list_ports
 import time
 import os
 import sys
@@ -30,7 +31,6 @@ try:
     from transformations import *
 except:
     has_ros = False
-    print("ROS is not installed")
 
 def rxDecoder(raw):
     ''' Decodes raw bytes received from the microcontroller. As per the agreed
@@ -149,73 +149,13 @@ def receivePacketFromMCU(ser):
                         startSeqCount = 0
             
     return (receive_succeeded, buff)
-
-def get_script_path():
-    return os.path.dirname(os.path.realpath(sys.argv[0]))
     
 class soccer_hardware:
     def __init__(self):
-        os.chdir(get_script_path())
-        logString("Starting PC-side application")
-        
-        parser = argparse.ArgumentParser(description='Soccer hardware')
-        parser.add_argument(
-            '-r',
-            '--ros',
-            help='Subscribes and publishes to ROS nodes (event-based). This is '
-                 'the flow used on the actual robot. Default: True if you have '
-                 'ROS installed, otherwise false',
-            default=True
-        )
-        parser.add_argument(
-            '--port',
-            help='The serial port used for communication. Default: /dev/ttyUSB0',
-            default='/dev/ttyACM0'
-        )
-        
-        parser.add_argument(
-            '--baud',
-            help='Serial port baud rate. Default: 230400',
-            default=230400
-        )
-        
-        parser.add_argument(
-            '--traj',
-            help='The trajectory to be used, if not in ROS mode. Default: '
-                 'standing.csv',
-            default='standing.csv'
-        )
-        
-        parser.add_argument(
-            '--step',
-            help='Causes goal angles to be sent when enter is pressed, if not '
-                 'in ROS mode. Default: False',
-            default=False
-        )
-        
-        parser.add_argument(
-            '__name',
-            nargs='?',
-            help='ROS argument'
-        )
-        
-        parser.add_argument(
-            '__log',
-            nargs='?',
-            help='ROS argument'
-        )
-        
-        args = vars(parser.parse_args())
-        
-        self.isROSmode = args['ros'] and has_ros
-        self.port = args['port']
-        self.baud = args['baud']
-        self.traj = args['traj']
-        self.step = args['step']
         self.num_transmissions = 0
         self.num_receptions = 0
         self.last_print_time = time.time()
-        
+
         logString("Started with ROS = {0}".format(self.isROSmode))
     
     def open_trajectory(self):
@@ -237,22 +177,32 @@ class soccer_hardware:
             logString("Will send standing pose instead...")
         return success
             
-                
-    def connect_to_embedded(self):
+
+    def connect_to_embedded(self, port=""):
+        ports = serial.tools.list_ports.comports()
+        if(len(ports) == 0):
+            logString("Error: No COM ports have been detected")
+        else:
+            ports = [port.device for port in ports]
+            logString("Available ports are: " + " ".join(ports))
+        
         logString(
             "Attempting connection to embedded systems via port {0} with baud rate {1}".format(
                 self.port,
                 self.baud
             )
         )
+        
         num_tries = 0
         while(1):
             try:
-                self.ser = serial.Serial(self.port, self.baud,timeout=100)
-                self.ser.open()
-            except:
+                self.ser = serial.Serial('COM3', self.baud, timeout=100)
+                break
+                self.ser = serial.Serial(self.port, self.baud, timeout=100)
+            except serial.serialutil.SerialException as e:
+                self.ser.close()
                 if(num_tries % 100 == 0):
-                    logString("Connection failed. Retrying...(attempt {0})".format(num_tries))
+                    logString("Serial exception {0}. Retrying...(attempt {0})".format(e, num_tries))
                 time.sleep(0.01)
                 num_tries = num_tries + 1
         logString("Connected")
@@ -338,8 +288,92 @@ class soccer_hardware:
         m = getCtrlToMcuAngleMap()
         goalangles[0:18,0] = m.dot(robotGoal.trajectories[0:18])
         self.communicate(goal_angles)
+
+def get_script_path():
+    return os.path.dirname(os.path.realpath(sys.argv[0]))
     
-if __name__ == "__main__":
+def parse_args():
+    os.chdir(get_script_path())
+    logString("Starting PC-side application")
+    
+    parser = argparse.ArgumentParser(description='Soccer hardware')
+    parser.add_argument(
+        '-r',
+        '--ros',
+        help='Subscribes and publishes to ROS nodes (event-based). This is '
+                'the flow used on the actual robot. Default: True if you have '
+                'ROS installed, otherwise false',
+        default=True
+    )
+    parser.add_argument(
+        '--port',
+        help='The serial port used for communication. Default: /dev/ttyUSB0',
+        default='/dev/ttyACM0'
+    )
+    
+    parser.add_argument(
+        '--baud',
+        help='Serial port baud rate. Default: 230400',
+        default=230400
+    )
+    
+    parser.add_argument(
+        '--traj',
+        help='The trajectory to be used, if not in ROS mode. Default: '
+                'standing.csv',
+        default='standing.csv'
+    )
+    
+    parser.add_argument(
+        '--step',
+        help='Causes goal angles to be sent when enter is pressed, if not '
+                'in ROS mode. Default: False',
+        default=False
+    )
+    
+    parser.add_argument(
+        '__name',
+        nargs='?',
+        help='ROS argument'
+    )
+    
+    parser.add_argument(
+        '__log',
+        nargs='?',
+        help='ROS argument'
+    )
+    
+    args = vars(parser.parse_args())
+    
+    arg_str = ""
+    for k in args.keys():
+        if(k == 'ros' and not has_ros):
+            original_arg = args[k]
+            args[k] = False
+            
+            arg_str = arg_str + k + "=" + str(False)
+            if(original_arg == True):
+                arg_str = arg_str + " (ROS is not installed)"
+                
+            arg_str = arg_str + ", "
+        else:
+            arg_str = arg_str + k + "=" + str(args[k]) + ", "
+
+    logString("Starting script with " + arg_str[:len(arg_str) - 2])
+    
+    return args
+    
+def main():
+    args = parse_args()
+    
+    sys.exit(0)
+    
+    ros = args['ros']
+    port = args['port']
+    baud = args['baud']
+    traj = args['traj']
+    step = args['step']
+    
     sh = soccer_hardware()
     sh.connect_to_embedded()
     
@@ -367,5 +401,11 @@ if __name__ == "__main__":
                     wait = input('Press enter to send next pose')
                 # Send standing pose
                 sh.communicate(np.zeros((18,1)))
-    
-    sys.exit(0)
+
+if __name__ == "__main__":
+    try:
+        main()
+        sys.exit(0)
+    except KeyboardInterrupt as e:
+        print("Interrupted: {0}".format(e))
+        sys.exit(e.errno)
