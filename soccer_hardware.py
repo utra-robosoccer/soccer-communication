@@ -210,8 +210,7 @@ class Receiver:
                 time_curr = time.time()
                 num_bytes_available = self.ser.in_waiting
             
-            if((time_curr - time_start) >= timeout):
-                # Treat timeout as hard requirement
+            if((num_bytes_available == 0) and (time_curr - time_start >= timeout)):
                 break
             else:
                 # If we receive some data, we process it here then go back to
@@ -313,7 +312,7 @@ class Comm:
                 logString("(Is your shell running in the soccer-communication directory?)")
                 logString("Standing pose will be sent instead...")
 
-    def print_angles(sent, received):
+    def print_angles(self, sent, received):
         ''' Prints out 2 numpy vectors side-by-side, where the first vector entry
             is interpreted as belonging to motor 1, the seconds to motor 2, etc.
         '''
@@ -325,16 +324,16 @@ class Comm:
         
         print(t)
     
-    def print_imu(received):
+    def print_imu(self, received):
         ''' Prints out a numpy vector interpreted as data from the IMU, in the
             order X-gyro, Y-gyro, Z-gyro, X-accel, Y-accel, Z-accel.
         '''
         
         t = PrettyTable(['', 'Gyro (deg/s)', 'Accel (m/s^2)'])
         
-        t.add_row(["X", round(received[0], 2), round(received[3], 2)])
-        t.add_row(["Y", round(received[1], 2), round(received[4], 2)])
-        t.add_row(["Z", round(received[2], 2), round(received[5], 2)])
+        t.add_row(["X", round(received[0][0], 2), round(received[3][0], 2)])
+        t.add_row(["Y", round(received[1][0], 2), round(received[4][0], 2)])
+        t.add_row(["Z", round(received[2][0], 2), round(received[5][0], 2)])
         
         print(t)
 
