@@ -289,6 +289,16 @@ class soccer_hardware:
         goalangles[0:18,0] = m.dot(robotGoal.trajectories[0:18])
         self.communicate(goal_angles)
 
+def list_ports():
+    ports = serial.tools.list_ports.comports()
+    msg = ""
+    if(len(ports) == 0):
+        msg = "Error: No COM ports have been detected"
+    else:
+        ports = [port.device for port in ports]
+        msg = "Available ports are: " + " ".join(ports)
+    return msg
+
 def get_script_path():
     return os.path.dirname(os.path.realpath(sys.argv[0]))
     
@@ -366,16 +376,32 @@ def parse_args():
 def main():
     args = parse_args()
     
-    sys.exit(0)
-    
     ros = args['ros']
     port = args['port']
     baud = args['baud']
     traj = args['traj']
     step = args['step']
     
-    sh = soccer_hardware()
-    sh.connect_to_embedded()
+    logString(list_ports())
+    
+    logString("Attempting connection to embedded")
+    logString("\tPort: " + port)
+    logString("\tBaud rate: " + str(baud))
+    
+    num_tries = 0
+    while(True):
+        try:
+            with serial.Serial(port, baud, timeout=10) as ser:
+                logString("Connected")
+                comm_loop(ros, traj, step)
+        except serial.serialutil.SerialException as e:
+            if(num_tries % 100 == 0):
+                if(str(e).find("FileNotFoundError")):
+                    logString("Port not found. Retrying...(attempt {0})".format(num_tries))
+                else:
+                    logString("Serial exception. Retrying...(attempt {0})".format(num_tries))
+            time.sleep(0.01)
+            num_tries = num_tries + 1
     
     if(sh.isROSmode):
         rospy.init_node('soccer_hardware', anonymous=True)
