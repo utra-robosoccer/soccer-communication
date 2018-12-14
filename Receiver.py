@@ -91,7 +91,8 @@ class Receiver:
                         else:
                             startSeqCount = 0
                 num_bytes_available = 0
-                            
+                if(receive_succeeded):
+                    break
         return (receive_succeeded, buff)
         
     def publish_sensor_data(self):

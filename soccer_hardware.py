@@ -15,7 +15,7 @@ def main():
     args = parse_args()
     
     ros_is_on = args['ros']
-    port = 'COM3' #args['port']
+    port = args['port']
     baud = args['baud']
     traj = args['traj']
     step_is_on = args['step']
