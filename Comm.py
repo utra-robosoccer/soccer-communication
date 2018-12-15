@@ -17,6 +17,7 @@ try:
     from geometry_msgs.msg import Quaternion
     from tf.msg import tfMessage
     from tf.transformations import quaternion_from_euler
+    from transformations import *
 except:
     pass
 
@@ -44,8 +45,8 @@ class Comm:
         if(self.ros_is_on):
             rospy.init_node('soccer_hardware', anonymous=True)
             rospy.Subscriber("robotGoal", RobotGoal, self.trajectory_callback, queue_size=1)
-            pub = rospy.Publisher('soccerbot/imu', Imu, queue_size=1)
-            pub2 = rospy.Publisher('soccerbot/robotState', RobotState, queue_size=1)
+            self.rx.pub = rospy.Publisher('soccerbot/imu', Imu, queue_size=1)
+            self.rx.pub2 = rospy.Publisher('soccerbot/robotState', RobotState, queue_size=1)
         else:
             trajectories_dir = os.path.join("trajectories", traj)
             try:
@@ -110,8 +111,9 @@ class Comm:
         used by controls to that used by embedded
         '''
         m = getCtrlToMcuAngleMap()
-        goalangles[0:18,0] = m.dot(robotGoal.trajectories[0:18])
-        self.communicate(goal_angles)
+        goalangles = m.dot(robotGoal.trajectories[0:18])
+        goalangles = goalangles[:, np.newaxis]
+        self.communicate(goalangles)
     
     def begin_event_loop(self):
         if(self.ros_is_on):

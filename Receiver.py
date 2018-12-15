@@ -102,7 +102,7 @@ class Receiver:
         imu.angular_velocity = vec1
         vec2 = Vector3(self.received_imu[5][0], self.received_imu[4][0], self.received_imu[3][0])
         imu.linear_acceleration = vec2
-        pub.publish(imu)
+        self.pub.publish(imu)
         
         # MOTOR FEEDBACK
         # Convert motor array from the embedded coordinate system to that
@@ -118,7 +118,7 @@ class Receiver:
         m = getCtrlToMcuAngleMap()
         robotState.joint_angles[0:12] = np.linalg.inv(m).dot(robotState.joint_angles[0:18])[0:12]
 
-        pub2.publish(robotState)
+        self.pub2.publish(robotState)
         
     def receive(self):
         (receive_succeeded, buff) = self.receive_packet_from_mcu()
@@ -133,5 +133,6 @@ class Receiver:
             self.received_imu = np.array(recvIMUData).reshape((6, 1))
             self.num_receptions = self.num_receptions + 1
         
-        if(self.ros_is_on):
-            self.publish_sensor_data()
+            # rfairley: indented this to avoid the "received_imu not a member" exception if receive_succeeded == false
+            if(self.ros_is_on):
+                self.publish_sensor_data()
