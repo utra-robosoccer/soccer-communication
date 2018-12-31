@@ -42,7 +42,7 @@ class Comm:
         self.tx = Transmitter(ser)
         self.rx = Receiver(ser, ros_is_on)
         
-        if(self.ros_is_on):
+        if(self.ros_is_on == True):
             rospy.init_node('soccer_hardware', anonymous=True)
             rospy.Subscriber("robotGoal", RobotGoal, self.trajectory_callback, queue_size=1)
             self.rx.pub = rospy.Publisher('soccerbot/imu', Imu, queue_size=1)
@@ -116,7 +116,7 @@ class Comm:
         self.communicate(goalangles)
     
     def begin_event_loop(self):
-        if(self.ros_is_on):
+        if(self.ros_is_on == True):
             rospy.spin() 
         else:
             while(True):
