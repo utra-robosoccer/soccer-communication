@@ -133,6 +133,6 @@ class Receiver:
             self.received_imu = np.array(recvIMUData).reshape((6, 1))
             self.num_receptions = self.num_receptions + 1
         
-            # rfairley: indented this to avoid the "received_imu not a member" exception if receive_succeeded == false
+            # Only publish to ROS on successful receive
             if(self.ros_is_on):
                 self.publish_sensor_data()
