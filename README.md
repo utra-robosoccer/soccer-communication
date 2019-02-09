@@ -21,5 +21,5 @@ There are currently 4 supported command-line arguments. All of them have default
 
 Example (similar to what it might look like for the embedded team):
 ```
-python soccer_hardware.py --ros=False --port=COM7 --baud=1000000 --traj=getupfront.csv
+python soccer_hardware.py --ros=False --port=COM7 --baud=230400 --traj=getupfront.csv
 ```
