@@ -134,5 +134,5 @@ class Receiver:
             self.num_receptions = self.num_receptions + 1
         
             # Only publish to ROS on successful receive
-            if(self.ros_is_on):
+            if(self.ros_is_on == True):
                 self.publish_sensor_data()
