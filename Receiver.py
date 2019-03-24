@@ -38,7 +38,6 @@ class Receiver:
         '''
         motors = list()
         imu = list()
-    
         for i in range(12):
             # Here, we only unpack for 12 motors since that's all we have connected
             # in our current setup
@@ -150,11 +149,7 @@ class Rx(Thread):
             else:
                 (receive_succeeded, buff) = self._receiver.receive_packet_from_mcu()
                 if receive_succeeded:
-                    # If our reception was successful, we update the class variables
-                    # for the received angles and received IMU data. Otherwise, we
-                    # just send back the last values we got successfully
                     (recvAngles, recvIMUData) = self._receiver.decode(buff)
-                    
                     angleArray = np.array(recvAngles)
                     received_angles = angleArray[:, np.newaxis]
                     received_imu = np.array(recvIMUData).reshape((6, 1))
@@ -163,15 +158,15 @@ class Rx(Thread):
 
 
 def test_callback(received_angles, received_imu):
-    print("\tGot angle data {0}".format(received_angles.shape))
-    print("\tGot IMU data {0}".format(received_imu.shape))
-    
+    print("Got angle data {0}".format(received_angles.shape))
+    print("Got IMU data {0}".format(received_imu.shape))
+
 
 if __name__ == "__main__":
     rx_thread = Rx(name="rx_th", ser="", dryrun=True)
     rx_thread.bind(test_callback)
     rx_thread.start()
-    while rx_thread.get_num_rx() < 20s:
+    while rx_thread.get_num_rx() < 20:
         pass
     rx_thread.stop()
     rx_thread.join()
