@@ -1,9 +1,9 @@
 # Receiver.py
 
-import time
 import serial
 import numpy as np
 import struct
+from threading import Thread, Event
 from transformations import *
 
 try:
@@ -19,13 +19,17 @@ except:
     pass
 
 class Receiver:
-    def __init__(self, ser, ros_is_on):
-        self.ser = ser
-        self.ros_is_on = ros_is_on
-        self.num_receptions = 0
+    def __init__(self, ser, dryrun):
+        self._ser = ser
+        self._dryrun = dryrun
         
-    def change_port(self, ser):
-        self.ser = ser
+    def _get_fake_packet(self):
+        header = struct.pack('<L', 0xFFFFFFFF)
+        id = struct.pack('<I', 0x1234)
+        payload = struct.pack('<B', 0x00)*80
+        footer = struct.pack('<L', 0x00000000)
+        packet = header + id + payload + footer
+        return packet
         
     def decode(self, raw):
         ''' Decodes raw bytes received from the microcontroller. As per the agreed
@@ -51,6 +55,9 @@ class Receiver:
         32-bit floats.
         '''
         
+        if self._dryrun:
+            return (True, self._get_fake_packet())
+        
         receive_succeeded = False
         
         totalBytesRead = 0
@@ -68,14 +75,14 @@ class Receiver:
             while((num_bytes_available == 0) and (time_curr - time_start < timeout)):
                 time.sleep(0.001)
                 time_curr = time.time()
-                num_bytes_available = self.ser.in_waiting
+                num_bytes_available = self._ser.in_waiting
             
             if((num_bytes_available == 0) and (time_curr - time_start >= timeout)):
                 break
             else:
                 # If we receive some data, we process it here then go back to
                 # waiting for more
-                rawData = self.ser.read(num_bytes_available)
+                rawData = self._ser.read(num_bytes_available)
                 for i in range(num_bytes_available):
                     if(startSeqCount == 4):
                         buff = buff + rawData[i:i+1]
@@ -91,48 +98,81 @@ class Receiver:
                         else:
                             startSeqCount = 0
                 num_bytes_available = 0
-                if(receive_succeeded):
+                if receive_succeeded:
                     break
         return (receive_succeeded, buff)
-        
-    def publish_sensor_data(self):
-        # IMU FEEDBACK
-        imu = Imu()
-        vec1 = Vector3(-self.received_imu[2][0], self.received_imu[1][0], self.received_imu[0][0])
-        imu.angular_velocity = vec1
-        vec2 = Vector3(self.received_imu[5][0], self.received_imu[4][0], self.received_imu[3][0])
-        imu.linear_acceleration = vec2
-        self.pub.publish(imu)
-        
-        # MOTOR FEEDBACK
-        # Convert motor array from the embedded coordinate system to that
-        # used by controls
-        ctrlAngleArray = mcuToCtrlAngles(self.received_angles)
-                
-        robotState = RobotState()
-        for i in range(12):
-            robotState.joint_angles[i] = ctrlAngleArray[i][0]
-        
-        # Convert motor array from the embedded order and sign convention
-        # to that used by controls
-        m = getCtrlToMcuAngleMap()
-        robotState.joint_angles[0:12] = np.linalg.inv(m).dot(robotState.joint_angles[0:18])[0:12]
 
-        self.pub2.publish(robotState)
+
+class Rx(Thread):
+    def __init__(self, group=None, target=None, name=None, args=(), **kwargs):
+        super(Rx, self).__init__(group=group, target=target, name=name)
+        self.args = args
+        self.kwargs = kwargs
+        self._name = name
+        self._stop_event = Event()
+        self._num_rx = 0
+        self._dryrun = kwargs['dryrun']
+        self._receiver = Receiver(kwargs['ser'], self._dryrun)
+        self._imu_payload = np.ndarray(shape=(6,1))
+        self._angles_payload = np.ndarray(shape=(12,1))
+
+    def stop(self):
+        '''
+        Causes the thread to exit after the next receive event (whether a
+        success or a failure)
+        '''
+        self._stop_event.set()
+
+    def _stopped(self):
+        return self._stop_event.is_set()
         
-    def receive(self):
-        (receive_succeeded, buff) = self.receive_packet_from_mcu()
-        if(receive_succeeded):
-            # If our reception was successful, we update the class variables
-            # for the received angles and received IMU data. Otherwise, we
-            # just send back the last values we got successfully
-            (recvAngles, recvIMUData) = self.decode(buff)
-            
-            angleArray = np.array(recvAngles)
-            self.received_angles = angleArray[:, np.newaxis]
-            self.received_imu = np.array(recvIMUData).reshape((6, 1))
-            self.num_receptions = self.num_receptions + 1
+    def get_num_rx(self):
+        '''
+        Returns the number of successful receptions
+        '''
+        return self._num_rx
         
-            # Only publish to ROS on successful receive
-            if(self.ros_is_on == True):
-                self.publish_sensor_data()
+    def bind(self, callback):
+        '''
+        Attaches a function to be called after a successful reception
+        '''
+        self._callback = callback
+
+    def run(self):
+        '''
+        Reads packets from the microcontroller and sends the data up to the
+        application through a callback function
+        '''
+        while(1):
+            if self._stopped():
+                print("Stopping Rx thread ({0})...".format(self._name))
+                return
+            else:
+                (receive_succeeded, buff) = self._receiver.receive_packet_from_mcu()
+                if receive_succeeded:
+                    # If our reception was successful, we update the class variables
+                    # for the received angles and received IMU data. Otherwise, we
+                    # just send back the last values we got successfully
+                    (recvAngles, recvIMUData) = self._receiver.decode(buff)
+                    
+                    angleArray = np.array(recvAngles)
+                    received_angles = angleArray[:, np.newaxis]
+                    received_imu = np.array(recvIMUData).reshape((6, 1))
+                    self._num_rx = self._num_rx + 1
+                    self._callback(received_angles, received_imu)
+
+
+def test_callback(received_angles, received_imu):
+    print("\tGot angle data {0}".format(received_angles.shape))
+    print("\tGot IMU data {0}".format(received_imu.shape))
+    
+
+if __name__ == "__main__":
+    rx_thread = Rx(name="rx_th", ser="", dryrun=True)
+    rx_thread.bind(test_callback)
+    rx_thread.start()
+    while rx_thread.get_num_rx() < 20s:
+        pass
+    rx_thread.stop()
+    rx_thread.join()
+    print("Stopping main")

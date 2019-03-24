@@ -9,26 +9,26 @@ class Tx(Thread):
         super(Tx, self).__init__(group=group, target=target, name=name)
         self.args = args
         self.kwargs = kwargs
-        self.print_queue = Queue(10)
+        self._cmd_queue = Queue(10)
         self._stop_event = Event()
         self._time = time.time()
 
     def stop(self):
         self._stop_event.set()
 
-    def stopped(self):
+    def _stopped(self):
         return self._stop_event.is_set()
         
     def send(self, str_to_print):
-        self.print_queue.put(str_to_print)
+        self._cmd_queue.put(str_to_print)
 
     def run(self):
         while(1):
-            if self.stopped():
+            if self._stopped():
                 print("Stopping Tx...")
                 return
-            if not self.print_queue.empty():
-                my_str = self.print_queue.get()
+            if not self._cmd_queue.empty():
+                my_str = self._cmd_queue.get()
                 print(my_str)
             elif time.time() - self._time > 1:
                 self._time = time.time()
@@ -40,7 +40,6 @@ class Rx(Thread):
         super(Rx, self).__init__(group=group, target=target, name=name)
         self.args = args
         self.kwargs = kwargs
-        self.print_queue = Queue(10)
         self._stop_event = Event()
         self._time = time.time()
         self._payload = np.ndarray(shape=(6,1))
@@ -48,7 +47,7 @@ class Rx(Thread):
     def stop(self):
         self._stop_event.set()
 
-    def stopped(self):
+    def _stopped(self):
         return self._stop_event.is_set()
         
     def bind(self, callback):
@@ -56,7 +55,7 @@ class Rx(Thread):
 
     def run(self):
         while(1):
-            if self.stopped():
+            if self._stopped():
                 print("Stopping Rx...")
                 return
             elif time.time() - self._time > 0.33:
