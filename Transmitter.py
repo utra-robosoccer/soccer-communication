@@ -6,12 +6,12 @@ import struct
 from threading import Thread, Event
 from queue import Queue
 from transformations import *
+from utility import logString
 
 class Transmitter:
     def __init__(self, ser, dryrun):
         self._ser = ser
         self._dryrun = dryrun
-        self._num_tx = 0
         
     def _send_packet_to_mcu(self, byteStream):
         ''' Sends bytes to the MCU with the header sequence attached.
@@ -40,30 +40,24 @@ class Transmitter:
             byteArr = byteArr + struct.pack('f', element)
         return byteArr
         
-    def get_num_tx():
-        return self._num_tx
-        
     def transmit(self, goal_angles):
         '''
         Converts the motor array from the coordinate system used by controls to
         that used by embedded and sends it to the MCU over serial
         '''
         goal_angles = ctrlToMcuAngles(goal_angles)
-        
         self._send_packet_to_mcu(self._vec2bytes(goal_angles))
-        self._num_tx = self._num_tx + 1
 
 
 class Tx(Thread):
-    def __init__(self, group=None, target=None, name=None, args=(), **kwargs):
+    def __init__(self, ser, dryrun=False, group=None, target=None, name=None):
         super(Tx, self).__init__(group=group, target=target, name=name)
-        self.args = args
-        self.kwargs = kwargs
         self._name = name
-        self._cmd_queue = Queue(10)
+        self._cmd_queue = Queue(1)
         self._stop_event = Event()
-        self._dryrun = kwargs['dryrun']
-        self._transmitter = Transmitter(kwargs['ser'], self._dryrun)
+        self._dryrun = dryrun
+        self._transmitter = Transmitter(ser, self._dryrun)
+        self._num_tx = 0
 
     def stop(self):
         '''
@@ -74,6 +68,9 @@ class Tx(Thread):
 
     def _stopped(self):
         return self._stop_event.is_set()
+
+    def get_num_tx(self):
+        return self._num_tx
         
     def send(self, goal_angles):
         '''
@@ -86,13 +83,18 @@ class Tx(Thread):
         '''
         Services the command queue; sends packets to the microcontroller.
         '''
-        while(1):
-            if self._stopped() and self._cmd_queue.empty():
-                print("Stopping Tx thread ({0})...".format(self._name))
-                return
-            while not self._cmd_queue.empty():
-                cmd = self._cmd_queue.get()
-                self._transmitter.transmit(cmd)
+        try:
+            while(1):
+                if self._stopped() and self._cmd_queue.empty():
+                    print("Stopping Tx thread ({0})...".format(self._name))
+                    return
+                while not self._cmd_queue.empty():
+                    cmd = self._cmd_queue.get()
+                    self._transmitter.transmit(cmd)
+                    self._num_tx = self._num_tx + 1
+        except serial.serialutil.SerialException as e:
+            logString("Serial exception in thread {0}".format(self._name))
+            return
 
 
 if __name__ == "__main__":

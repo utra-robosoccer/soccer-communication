@@ -3,8 +3,10 @@
 import serial
 import numpy as np
 import struct
+import time
 from threading import Thread, Event
 from transformations import *
+from utility import logString
 
 try:
     import rospy
@@ -103,15 +105,13 @@ class Receiver:
 
 
 class Rx(Thread):
-    def __init__(self, group=None, target=None, name=None, args=(), **kwargs):
+    def __init__(self, ser, dryrun=False, group=None, target=None, name=None):
         super(Rx, self).__init__(group=group, target=target, name=name)
-        self.args = args
-        self.kwargs = kwargs
         self._name = name
         self._stop_event = Event()
         self._num_rx = 0
-        self._dryrun = kwargs['dryrun']
-        self._receiver = Receiver(kwargs['ser'], self._dryrun)
+        self._dryrun = dryrun 
+        self._receiver = Receiver(ser, self._dryrun)
         self._imu_payload = np.ndarray(shape=(6,1))
         self._angles_payload = np.ndarray(shape=(12,1))
 
@@ -142,19 +142,23 @@ class Rx(Thread):
         Reads packets from the microcontroller and sends the data up to the
         application through a callback function
         '''
-        while(1):
-            if self._stopped():
-                print("Stopping Rx thread ({0})...".format(self._name))
-                return
-            else:
-                (receive_succeeded, buff) = self._receiver.receive_packet_from_mcu()
-                if receive_succeeded:
-                    (recvAngles, recvIMUData) = self._receiver.decode(buff)
-                    angleArray = np.array(recvAngles)
-                    received_angles = angleArray[:, np.newaxis]
-                    received_imu = np.array(recvIMUData).reshape((6, 1))
-                    self._num_rx = self._num_rx + 1
-                    self._callback(received_angles, received_imu)
+        try:
+            while(1):
+                if self._stopped():
+                    print("Stopping Rx thread ({0})...".format(self._name))
+                    return
+                else:
+                    (receive_succeeded, buff) = self._receiver.receive_packet_from_mcu()
+                    if receive_succeeded:
+                        (recvAngles, recvIMUData) = self._receiver.decode(buff)
+                        angleArray = np.array(recvAngles)
+                        received_angles = angleArray[:, np.newaxis]
+                        received_imu = np.array(recvIMUData).reshape((6, 1))
+                        self._num_rx = self._num_rx + 1
+                        self._callback(received_angles, received_imu)
+        except serial.serialutil.SerialException as e:
+            logString("Serial exception in thread {0}".format(self._name))
+            return
 
 
 def test_callback(received_angles, received_imu):
