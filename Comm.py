@@ -23,6 +23,7 @@ except:
 
 class Comm:
     def __init__(self):
+        self._started = False
         return
 
     def _print_angles(self, sent, received):
@@ -104,6 +105,7 @@ class Comm:
         
         self._tx_thread = Tx(name="tx_th", ser=ser)
         self._rx_thread = Rx(name="rx_th", ser=ser)
+        self._rx_thread.set_timeout(0.010) # 10 ms
         self._rx_thread.bind(self._receive_callback)
         
         if(self._ros_is_on == True):
@@ -130,6 +132,7 @@ class Comm:
     def begin_event_loop(self):
         self._rx_thread.start()
         self._tx_thread.start()
+        self._started = True
         if self._ros_is_on == True:
             rospy.spin()
         elif self._use_trajectory:
@@ -141,6 +144,8 @@ class Comm:
                 for i in range(self._trajectory.shape[1]):
                     if self._step_is_on:
                         wait = input('Press enter to send next pose')
+                    else:
+                        time.sleep(0.010)
                     self._goal_angles = self._trajectory[:, i:i+1]
                     self._tx_thread.send(self._goal_angles)
         else:
@@ -149,10 +154,16 @@ class Comm:
             while True:
                 if self._step_is_on:
                     wait = input('Press enter to send next pose')
+                else:
+                    time.sleep(0.010)
                 self._tx_thread.send(self._goal_angles)
 
-    def cleanup():
-        self._rx_thread.stop()
-        self._tx_thread.stop()
-        self._rx_thread.join()
-        self._tx_thread.join()
+    def cleanup(self):
+        logString("Cleaning up...")
+        if self._started:
+            self._rx_thread.stop()
+            self._tx_thread.stop()
+            self._rx_thread.join()
+            logString("Rx thread joined")
+            self._tx_thread.join()
+            logString("Tx thread joined")

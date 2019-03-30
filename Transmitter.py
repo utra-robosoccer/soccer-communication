@@ -27,7 +27,7 @@ class Transmitter:
         
         packet = header + id + byteStream + padding + footer
         if self._dryrun:
-            print("{0}: ".format(self._num_tx) + str(packet) + "\n")
+            print(str(packet) + "\n")
         else:
             self._ser.write(packet)
         
@@ -86,15 +86,15 @@ class Tx(Thread):
         try:
             while(1):
                 if self._stopped() and self._cmd_queue.empty():
-                    print("Stopping Tx thread ({0})...".format(self._name))
-                    return
+                    break
                 while not self._cmd_queue.empty():
                     cmd = self._cmd_queue.get()
                     self._transmitter.transmit(cmd)
                     self._num_tx = self._num_tx + 1
         except serial.serialutil.SerialException as e:
             logString("Serial exception in thread {0}".format(self._name))
-            return
+        logString("Stopping Tx thread ({0})...".format(self._name))
+        return
 
 
 if __name__ == "__main__":
