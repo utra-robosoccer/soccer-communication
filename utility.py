@@ -4,6 +4,7 @@ import argparse
 import serial.tools.list_ports
 import os
 import sys
+from threading import Lock
 
 from datetime import datetime
 
@@ -13,10 +14,13 @@ try:
 except:
     has_ros = False
     
+
+print_lock = Lock()
 def logString(userMsg):
     ''' Prints the desired string to the shell, precedded by the date and time.
     '''
-    print(datetime.now().strftime('%H.%M.%S.%f') + " " + userMsg)
+    with print_lock:
+        print(datetime.now().strftime('%H.%M.%S.%f') + " " + userMsg)
 
 def list_ports():
     ports = serial.tools.list_ports.comports()

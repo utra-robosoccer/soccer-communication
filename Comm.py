@@ -159,7 +159,7 @@ class Comm:
                 self._tx_thread.send(self._goal_angles)
 
     def cleanup(self):
-        logString("Cleaning up...")
+        logString("Cleaning up threads...")
         if self._started:
             self._rx_thread.stop()
             self._tx_thread.stop()

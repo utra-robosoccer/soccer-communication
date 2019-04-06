@@ -8,24 +8,33 @@ from threading import Thread, Event
 from transformations import *
 from utility import logString
 
-try:
-    import rospy
-    from soccer_msgs.msg import RobotGoal
-    from soccer_msgs.msg import RobotState
-    from sensor_msgs.msg import Imu
-    from geometry_msgs.msg import Vector3
-    from geometry_msgs.msg import Quaternion
-    from tf.msg import tfMessage
-    from tf.transformations import quaternion_from_euler
-except:
-    pass
 
-class Receiver:
-    def __init__(self, ser, dryrun):
+class Rx(Thread):
+    def __init__(self, ser, dryrun=False, group=None, target=None, name=None):
+        super(Rx, self).__init__(group=group, target=target, name=name)
+        self._name = name
+        self._stop_event = Event()
+        self._num_rx = 0
+        self._dryrun = dryrun 
         self._ser = ser
-        self._dryrun = dryrun
-        
+        self._timeout = 0.010 # 10 ms
+        self._imu_payload = np.ndarray(shape=(6,1))
+        self._angles_payload = np.ndarray(shape=(12,1))
+
+    def stop(self):
+        '''
+        Causes the thread to exit after the next receive event (whether a
+        success or a failure)
+        '''
+        self._stop_event.set()
+
+    def _stop_requested(self):
+        return self._stop_event.is_set()
+    
     def _get_fake_packet(self):
+        '''
+        Testing-only method
+        '''
         header = struct.pack('<L', 0xFFFFFFFF)
         id = struct.pack('<I', 0x1234)
         payload = struct.pack('<B', 0x00)*80
@@ -33,7 +42,7 @@ class Receiver:
         packet = header + id + payload + footer
         return packet
         
-    def decode(self, raw):
+    def _decode(self, raw):
         ''' Decodes raw bytes received from the microcontroller. As per the agreed
             upon protocol, the first 4 bytes are for a header while the remaining
             80 bytes contain floats for each motor.
@@ -49,7 +58,7 @@ class Receiver:
             imu.append(struct.unpack('<f', raw[52 + i * 4: 56 + i * 4])[0])
         return (motors, imu)
         
-    def receive_packet_from_mcu(self, timeout):
+    def _receive_packet_from_mcu(self, timeout):
         '''
         Receives 80 bytes of the MCU provided that there is a valid 4-byte 
         header attached to the front. Returns the list of data interpreted as
@@ -63,7 +72,6 @@ class Receiver:
             decimal such as 0.010, i.e. 10 ms) and is always relative to the
             time the first byte of the packet is received
         '''
-        
         if self._dryrun:
             return (True, self._get_fake_packet())
         
@@ -81,13 +89,15 @@ class Receiver:
         while(True):
             # First, we wait until we have received some data. If data has
             # already been received, then we quit if the timeout has elapsed
-            while((num_bytes_available == 0) and not (data_received and (time_curr - time_start >= timeout))):
+            while((num_bytes_available == 0) and
+                  not (data_received and (time_curr - time_start >= timeout)) and
+                  not self._stop_requested()):
                 #time.sleep(0.001)
                 time_curr = time.time()
                 num_bytes_available = self._ser.in_waiting
-            
-            if((num_bytes_available == 0) and (data_received and (time_curr - time_start >= timeout))):
-                break
+            if self._stop_requested() or ((num_bytes_available == 0) and
+                (data_received and (time_curr - time_start >= timeout))):
+                    break
             else:
                 data_received = True
                 # If we receive some data, we process it here then go back to
@@ -113,38 +123,15 @@ class Receiver:
                     break
         return (receive_succeeded, buff)
 
-
-class Rx(Thread):
-    def __init__(self, ser, dryrun=False, group=None, target=None, name=None):
-        super(Rx, self).__init__(group=group, target=target, name=name)
-        self._name = name
-        self._stop_event = Event()
-        self._num_rx = 0
-        self._dryrun = dryrun 
-        self._receiver = Receiver(ser, self._dryrun)
-        self._timeout = 0.010 # 10 ms
-        self._imu_payload = np.ndarray(shape=(6,1))
-        self._angles_payload = np.ndarray(shape=(12,1))
-
-    def stop(self):
-        '''
-        Causes the thread to exit after the next receive event (whether a
-        success or a failure)
-        '''
-        self._stop_event.set()
-
-    def _stopped(self):
-        return self._stop_event.is_set()
-        
     def get_num_rx(self):
         '''
         Returns the number of successful receptions
         '''
         return self._num_rx
-        
+
     def set_timeout(self, timeout):
         self._timeout = timeout;
-        
+
     def bind(self, callback):
         '''
         Attaches a function to be called after a successful reception
@@ -158,12 +145,12 @@ class Rx(Thread):
         '''
         try:
             while(1):
-                if self._stopped():
+                if self._stop_requested():
                     break
                 else:
-                    (receive_succeeded, buff) = self._receiver.receive_packet_from_mcu(self._timeout)
+                    (receive_succeeded, buff) = self._receive_packet_from_mcu(self._timeout)
                     if receive_succeeded:
-                        (recvAngles, recvIMUData) = self._receiver.decode(buff)
+                        (recvAngles, recvIMUData) = self._decode(buff)
                         angleArray = np.array(recvAngles)
                         received_angles = angleArray[:, np.newaxis]
                         received_imu = np.array(recvIMUData).reshape((6, 1))
