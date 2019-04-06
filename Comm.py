@@ -24,6 +24,10 @@ except:
 class Comm:
     def __init__(self):
         self._started = False
+        self._last_angles = np.ndarray
+        self._last_imu = np.ndarray
+        self._num_rx = 0
+        self._num_tx = 0
         return
 
     def _print_angles(self, sent, received):
@@ -47,18 +51,19 @@ class Comm:
         t.add_row(["Z", round(received[2][0], 2), round(received[5][0], 2)])
         print(t)
 
-    def _print_handler(self, received_angles, received_imu):
+    def _print_handler(self):
         current_time = time.time()
         if(current_time - self._last_print_time >= 1):
             self._last_print_time = current_time
             print('\n')
-            num_rx = self._rx_thread.get_num_rx()
-            logString("Received: {0}".format(num_rx))
-            logString("Transmitted: {0}\n".format(self._tx_thread.get_num_tx()))
-            if(num_rx > 0):
+            self._num_rx = self._rx_thread.get_num_rx()
+            logString("Received: {0}".format(self._num_rx))
+            self._num_tx = self._tx_thread.get_num_tx()
+            logString("Transmitted: {0}\n".format(self._num_tx))
+            if(self._num_rx > 0):
                 # Prints the last valid data received
-                self._print_angles(self._goal_angles[0:12], received_angles[0:12])
-                self._print_imu(received_imu)
+                self._print_angles(self._goal_angles[0:12], self._last_angles[0:12])
+                self._print_imu(self._last_imu)
     
     def _trajectory_callback(self, robotGoal):
         '''
@@ -93,7 +98,8 @@ class Comm:
         self._pub_angles.publish(robotState)
     
     def _receive_callback(self, received_angles, received_imu):
-        self._print_handler(received_angles, received_imu)
+        self._last_angles = received_angles
+        self._last_imu = received_imu
         if self._ros_is_on == True:
             self._publish_sensor_data(received_angles, received_imu)
 
@@ -148,6 +154,7 @@ class Comm:
                         time.sleep(0.010)
                     self._goal_angles = self._trajectory[:, i:i+1]
                     self._tx_thread.send(self._goal_angles)
+                    self._print_handler()
         else:
             # Send standing pose
             self._goal_angles = np.zeros((18,1));
@@ -157,13 +164,19 @@ class Comm:
                 else:
                     time.sleep(0.010)
                 self._tx_thread.send(self._goal_angles)
+                self._print_handler()
 
     def cleanup(self):
-        logString("Cleaning up threads...")
         if self._started:
+            logString("Cleaning up threads...")
             self._rx_thread.stop()
             self._tx_thread.stop()
             self._rx_thread.join()
             logString("Rx thread joined")
             self._tx_thread.join()
             logString("Tx thread joined")
+            if self._num_rx != 0 and self._num_tx != 0:
+                logString("Transmitted {0} packets and received {1} ({2}% success)".format(
+                        self._num_tx, self._num_rx, self._num_rx*100.0/self._num_tx
+                    )
+                )

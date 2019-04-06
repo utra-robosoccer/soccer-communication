@@ -29,14 +29,18 @@ def main():
     num_tries = 0
     comm = Comm()
     ser = serial.Serial(port, baud, timeout=0)
+    first = True
     try:
         while True:
             try:
                 logString("Connected")
-                ser.open()
+                if not first:
+                    ser.open()
+                first = False
                 comm.init(ser, ros_is_on, traj, step_is_on)
                 comm.begin_event_loop()
             except serial.serialutil.SerialException as e:
+                comm.cleanup()
                 ser.close()
                 if(num_tries % 10 == 0):
                     if(str(e).find("FileNotFoundError")):

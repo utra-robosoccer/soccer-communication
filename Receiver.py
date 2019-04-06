@@ -4,7 +4,7 @@ import serial
 import numpy as np
 import struct
 import time
-from threading import Thread, Event
+from threading import Thread, Event, Lock
 from transformations import *
 from utility import logString
 
@@ -17,6 +17,7 @@ class Rx(Thread):
         self._num_rx = 0
         self._dryrun = dryrun 
         self._ser = ser
+        self._num_rx_lock = Lock()
         self._timeout = 0.010 # 10 ms
         self._imu_payload = np.ndarray(shape=(6,1))
         self._angles_payload = np.ndarray(shape=(12,1))
@@ -92,7 +93,7 @@ class Rx(Thread):
             while((num_bytes_available == 0) and
                   not (data_received and (time_curr - time_start >= timeout)) and
                   not self._stop_requested()):
-                #time.sleep(0.001)
+                time.sleep(0.001)
                 time_curr = time.time()
                 num_bytes_available = self._ser.in_waiting
             if self._stop_requested() or ((num_bytes_available == 0) and
@@ -105,6 +106,7 @@ class Rx(Thread):
                 rawData = self._ser.read(num_bytes_available)
                 for i in range(num_bytes_available):
                     if(startSeqCount == 4):
+
                         buff = buff + rawData[i:i+1]
                         totalBytesRead = totalBytesRead + 1
                         
@@ -113,13 +115,14 @@ class Rx(Thread):
                             receive_succeeded = True
                             break
                     else:
-                        byte = struct.unpack('<B', rawData[i:i+1])[0]
-                        if(byte == 0xFF):
+                        if(struct.unpack('<B', rawData[i:i+1])[0] == 0xFF):
                             startSeqCount = startSeqCount + 1
                         else:
                             startSeqCount = 0
                 num_bytes_available = 0
                 if receive_succeeded:
+                    with self._num_rx_lock:
+                        self._num_rx = self._num_rx + 1
                     break
         return (receive_succeeded, buff)
 
@@ -127,7 +130,8 @@ class Rx(Thread):
         '''
         Returns the number of successful receptions
         '''
-        return self._num_rx
+        with self._num_rx_lock:
+            return self._num_rx
 
     def set_timeout(self, timeout):
         self._timeout = timeout;
@@ -143,6 +147,7 @@ class Rx(Thread):
         Reads packets from the microcontroller and sends the data up to the
         application through a callback function
         '''
+        logString("Starting Rx thread ({0})...".format(self._name))
         try:
             while(1):
                 if self._stop_requested():
@@ -154,18 +159,14 @@ class Rx(Thread):
                         angleArray = np.array(recvAngles)
                         received_angles = angleArray[:, np.newaxis]
                         received_imu = np.array(recvIMUData).reshape((6, 1))
-                        self._num_rx = self._num_rx + 1
                         self._callback(received_angles, received_imu)
         except serial.serialutil.SerialException as e:
             logString("Serial exception in thread {0}".format(self._name))
         logString("Stopping Rx thread ({0})...".format(self._name))
         return
-
-
+    
 def test_callback(received_angles, received_imu):
-    print("Got angle data {0}".format(received_angles.shape))
-    print("Got IMU data {0}".format(received_imu.shape))
-
+    logString("Got angles and imu data")
 
 if __name__ == "__main__":
     rx_thread = Rx(name="rx_th", ser="", dryrun=True)
