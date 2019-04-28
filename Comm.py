@@ -20,6 +20,68 @@ try:
     from transformations import *
 except:
     pass
+    
+class WaitForMs:
+    '''
+    Delays using time.sleep() have a tendency to overshoot the target wait time.
+    This class uses feedback to adjust the wait time to achieve the target.
+    '''
+    def __init__(self, ms):
+        self._t_ref = ms / 1000.0
+        self._t_err = 0
+        self._e_gain = 0.0
+        self._e_lim_high = 0.0
+        self._e_lim_low = 0.0
+        self._debug = False
+    
+    def set_e_gain(self, e):
+        '''
+        Sets the error amplification factor.
+        '''
+        self._e_gain = e
+    
+    def set_e_lim(self, high, low):
+        '''
+        Sets the max and min error bounds. Arguments in ms.
+        '''
+        self._e_lim_high = high / 1000.0
+        self._e_lim_low = low / 1000.0
+        
+    def _limit(self, err):
+        '''
+        Bounds the error feedback, if necessary, so that
+        _e_lim_high >= err >= _e_lim_low.
+        '''
+        if err > self._e_lim_high:
+            return self._e_lim_high
+        elif err < self._e_lim_low:
+           return self._e_lim_low
+        else:
+            return err
+
+    def wait(self):
+        '''
+        Wait with feedback and limiting. Behaves like time.sleep if the gain and
+        limits are not set.
+        '''
+        ts = time.time()
+        
+        # Adjust wait time based on previous error
+        t_wait = self._t_ref + self._t_err
+        time.sleep(t_wait)
+        
+        # Update error term
+        t_waited = time.time() - ts
+        err = self._t_ref - t_waited
+        self._t_err = self._t_err + self._e_gain*err
+        self._t_err = self._limit(err)
+            
+        if self._debug:
+            print(
+                np.round(t_wait*1000,4), np.round(t_waited*1000,4),
+                np.round(err*1000,4), np.round(self._t_err*1000,4)
+            )
+
 
 class Comm:
     def __init__(self):
@@ -28,6 +90,7 @@ class Comm:
         self._last_imu = np.ndarray
         self._num_rx = 0
         self._num_tx = 0
+        self._t_start = 0
         return
 
     def _print_angles(self, sent, received):
@@ -56,7 +119,7 @@ class Comm:
         if(current_time - self._last_print_time >= 1):
             self._last_print_time = current_time
             print('\n')
-            self._num_rx = self._rx_thread.get_num_rx()
+            self._num_rx = self._rx_thread.get_num_rx()[0]
             logString("Received: {0}".format(self._num_rx))
             self._num_tx = self._tx_thread.get_num_tx()
             logString("Transmitted: {0}\n".format(self._num_tx))
@@ -103,10 +166,11 @@ class Comm:
         if self._ros_is_on == True:
             self._publish_sensor_data(received_angles, received_imu)
 
-    def init(self, ser, ros_is_on, traj, step_is_on):
+    def init(self, ser, ros_is_on, traj, step_is_on, wait_feedback_is_on):
         self._last_print_time = time.time()
         self._ros_is_on = ros_is_on
         self._step_is_on = step_is_on
+        self._wait_feedback_is_on = wait_feedback_is_on
         self._use_trajectory = False
         
         self._tx_thread = Tx(name="tx_th", ser=ser)
@@ -138,7 +202,15 @@ class Comm:
     def begin_event_loop(self):
         self._rx_thread.start()
         self._tx_thread.start()
+        self._t_start = time.time()
         self._started = True
+        
+        tx_cycle = WaitForMs(10)
+        tx_cycle.set_e_gain(1.5)
+        # Never need to wait longer than the target time, but allow calls to
+        # time.sleep for down to 3 ms less than the desired time
+        tx_cycle.set_e_lim(0, -3.0)
+        
         if self._ros_is_on == True:
             rospy.spin()
         elif self._use_trajectory:
@@ -150,6 +222,8 @@ class Comm:
                 for i in range(self._trajectory.shape[1]):
                     if self._step_is_on:
                         wait = input('Press enter to send next pose')
+                    elif self._wait_feedback_is_on == True:
+                        tx_cycle.wait()
                     else:
                         time.sleep(0.010)
                     self._goal_angles = self._trajectory[:, i:i+1]
@@ -161,6 +235,8 @@ class Comm:
             while True:
                 if self._step_is_on:
                     wait = input('Press enter to send next pose')
+                elif self._wait_feedback_is_on == True:
+                    tx_cycle.wait()
                 else:
                     time.sleep(0.010)
                 self._tx_thread.send(self._goal_angles)
@@ -171,12 +247,29 @@ class Comm:
             logString("Cleaning up threads...")
             self._rx_thread.stop()
             self._tx_thread.stop()
+            self._num_rx, num_rx_failures = self._rx_thread.get_num_rx()
+            self._num_tx = self._tx_thread.get_num_tx()
             self._rx_thread.join()
             logString("Rx thread joined")
             self._tx_thread.join()
             logString("Tx thread joined")
+            t_stop = time.time()
             if self._num_rx != 0 and self._num_tx != 0:
                 logString("Transmitted {0} packets and received {1} ({2}% success)".format(
-                        self._num_tx, self._num_rx, self._num_rx*100.0/self._num_tx
+                        self._num_tx, self._num_rx, np.round(self._num_rx*100.0/self._num_tx, 2)
                     )
                 )
+                
+                tx_period = (t_stop - self._t_start) / self._num_tx
+                logString("Transmitted {0} packets/s on average (period = {1} ms)".format(
+                        np.round(1/tx_period, 2), np.round(tx_period * 1000, 2)
+                    )
+                )
+                
+                rx_period = (t_stop - self._t_start) / self._num_rx
+                logString("Received {0} packets/s on average (period = {1} ms)".format(
+                        np.round(1/rx_period, 2), np.round(rx_period * 1000, 2)
+                    )
+                )
+                
+                logString("{0} reception(s) timed out".format(num_rx_failures))

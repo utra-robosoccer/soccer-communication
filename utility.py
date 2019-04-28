@@ -75,6 +75,13 @@ def parse_args():
     )
     
     parser.add_argument(
+        '--use_wait_feedback',
+        help='Causes delays between transmissions to adjust on-the-fly to '
+             'achieve desired wait times, for non-ROS modes. Default: True',
+        default=True
+    )
+    
+    parser.add_argument(
         '__name',
         nargs='?',
         help='ROS argument'

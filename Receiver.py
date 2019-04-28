@@ -21,6 +21,7 @@ class Rx(Thread):
         self._timeout = 0.010 # 10 ms
         self._imu_payload = np.ndarray(shape=(6,1))
         self._angles_payload = np.ndarray(shape=(12,1))
+        self._num_rx_failures = 0
 
     def stop(self):
         '''
@@ -128,10 +129,10 @@ class Rx(Thread):
 
     def get_num_rx(self):
         '''
-        Returns the number of successful receptions
+        Returns the number of successful and failed receptions
         '''
         with self._num_rx_lock:
-            return self._num_rx
+            return self._num_rx, self._num_rx_failures
 
     def set_timeout(self, timeout):
         self._timeout = timeout;
@@ -160,6 +161,8 @@ class Rx(Thread):
                         received_angles = angleArray[:, np.newaxis]
                         received_imu = np.array(recvIMUData).reshape((6, 1))
                         self._callback(received_angles, received_imu)
+                    else:
+                        self._num_rx_failures = self._num_rx_failures + 1
         except serial.serialutil.SerialException as e:
             logString("Serial exception in thread {0}".format(self._name))
         logString("Stopping Rx thread ({0})...".format(self._name))

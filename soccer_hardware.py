@@ -19,6 +19,7 @@ def main():
     baud = args['baud']
     traj = args['traj']
     step_is_on = args['step']
+    wait_feedback_is_on = args['use_wait_feedback']
     
     logString(list_ports())
     
@@ -37,7 +38,7 @@ def main():
                 if not first:
                     ser.open()
                 first = False
-                comm.init(ser, ros_is_on, traj, step_is_on)
+                comm.init(ser, ros_is_on, traj, step_is_on, wait_feedback_is_on)
                 comm.begin_event_loop()
             except serial.serialutil.SerialException as e:
                 comm.cleanup()
