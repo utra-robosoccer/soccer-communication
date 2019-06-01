@@ -4,7 +4,11 @@ import serial
 import numpy as np
 import struct
 from threading import Thread, Event, Lock
-from queue import Queue
+import sys
+if sys.version_info > (3, 0):
+    from queue import Queue
+else:
+    from Queue import Queue
 from transformations import *
 from utility import logString
 
